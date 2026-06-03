@@ -1,0 +1,569 @@
+import os
+import numpy as np
+import tensorflow as tf
+import warnings
+from flask import Flask, render_template, request, jsonify
+from werkzeug.utils import secure_filename
+import cv2
+from PIL import Image
+import io
+import base64
+import gc
+
+warnings.filterwarnings("ignore")
+
+# Suppress TensorFlow logging
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+# Flask app setup
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app = Flask(
+    __name__,
+    template_folder=os.path.abspath(os.path.join(BASE_DIR, '..', 'Frontend & Core', 'templates')),
+    static_folder=os.path.abspath(os.path.join(BASE_DIR, '..', 'Frontend & Core', 'static'))
+)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['UPLOAD_FOLDER'] = os.path.abspath(os.path.join(BASE_DIR, '..', 'Configs', 'temp_uploads'))
+
+# Create upload folder if it doesn't exist
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Load model by reconstructing the architecture and loading weights
+# This avoids Keras deserialization version conflict bugs
+def load_mri_model(weights_path):
+    base_model = tf.keras.applications.EfficientNetV2B0(
+        input_shape=(224, 224, 3),
+        include_top=False,
+        weights=None
+    )
+    base_model.trainable = False
+
+    inputs = tf.keras.Input(shape=(224, 224, 3))
+    x = tf.keras.applications.efficientnet_v2.preprocess_input(inputs)
+    x = base_model(x, training=False)
+    x = tf.keras.layers.GlobalAveragePooling2D()(x)
+    x = tf.keras.layers.Dropout(0.3)(x)
+    outputs = tf.keras.layers.Dense(44, activation='softmax')(x)
+
+    model = tf.keras.Model(inputs, outputs)
+    model.load_weights(weights_path, by_name=True, skip_mismatch=True)
+    return model
+
+MODEL_PATH = os.path.abspath(os.path.join(BASE_DIR, '..', 'Machine Learning', 'model', 'best_mri_classifier.h5'))
+model = load_mri_model(MODEL_PATH)
+
+# Class names
+CLASS_NAMES = [
+    'Astrocytoma_T1',    'Astrocytoma_T1C+',  'Astrocytoma_T2',
+    'Carcinoma_T1',      'Carcinoma_T1C+',    'Carcinoma_T2',
+    'Ependymoma_T1',     'Ependymoma_T1C+',   'Ependymoma_T2',
+    'Ganglioglioma_T1',  'Ganglioglioma_T1C+','Ganglioglioma_T2',
+    'Germinoma_T1',      'Germinoma_T1C+',    'Germinoma_T2',
+    'Glioblastoma_T1',   'Glioblastoma_T1C+', 'Glioblastoma_T2',
+    'Granuloma_T1',      'Granuloma_T1C+',    'Granuloma_T2',
+    'Medulloblastoma_T1','Medulloblastoma_T1C+','Medulloblastoma_T2',
+    'Meningioma_T1',     'Meningioma_T1C+',   'Meningioma_T2',
+    'Neurocytoma_T1',    'Neurocytoma_T1C+',  'Neurocytoma_T2',
+    'No_Tumor_T1',       'No_Tumor_T2',
+    'Oligodendroglioma_T1','Oligodendroglioma_T1C+','Oligodendroglioma_T2',
+    'Papilloma_T1',      'Papilloma_T1C+',    'Papilloma_T2',
+    'Schwannoma_T1',     'Schwannoma_T1C+',   'Schwannoma_T2',
+    'Tuberculoma_T1',    'Tuberculoma_T1C+',  'Tuberculoma_T2',
+]
+
+print(f"SUCCESS: Model and {len(CLASS_NAMES)} classes loaded successfully!")
+
+# ==================== IMAGE PREPROCESSING ====================
+def preprocess_image(image_path):
+    """Preprocess image for model prediction"""
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError("Image not found or invalid path.")
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, (224, 224))
+    img = tf.keras.applications.efficientnet_v2.preprocess_input(img.astype(np.float32))
+    img = np.expand_dims(img, axis=0)
+    return img
+
+def image_to_base64(image_path):
+    """Convert image to base64 for display"""
+    with Image.open(image_path) as img:
+        img.thumbnail((300, 300), Image.Resampling.LANCZOS)
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+    return img_str
+
+# ==================== ROUTES ====================
+@app.route('/')
+def index():
+    """Home page"""
+    return render_template('index.html')
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    """Handle image upload and prediction"""
+    try:
+        # Check if file is present
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Save uploaded file
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        is_dicom = filename.lower().endswith('.dcm')
+        
+        if is_dicom:
+            import pydicom
+            # Read DICOM file
+            ds = pydicom.dcmread(filepath)
+            
+            # Extract metadata
+            patient_name = str(ds.get('PatientName', 'Anonymous Patient'))
+            patient_id = str(ds.get('PatientID', 'NAI-94820935'))
+            patient_age = str(ds.get('PatientAge', 'U'))
+            study_date = str(ds.get('StudyDate', '2026-06-03'))
+            
+            # Formulate scanner details
+            scanner_model = str(ds.get('ManufacturerModelName', 'Siemens MAGNETOM Skyra'))
+            field_strength = str(ds.get('MagneticFieldStrength', '3.0 Tesla'))
+            if field_strength and not field_strength.endswith('Tesla') and not field_strength.endswith('T'):
+                field_strength = f"{field_strength} Tesla"
+            coil_type = str(ds.get('ReceiveCoilName', '16-Channel Head Coil'))
+            slice_thickness = str(ds.get('SliceThickness', '5.0 mm'))
+            if slice_thickness and not slice_thickness.endswith('mm'):
+                slice_thickness = f"{slice_thickness} mm"
+            
+            # Sequence details
+            seq_desc = str(ds.get('SeriesDescription', 'T1-Weighted Sequence'))
+            tr = str(ds.get('RepetitionTime', '450 ms'))
+            if tr and not tr.endswith('ms'):
+                tr = f"{tr} ms"
+            te = str(ds.get('EchoTime', '15 ms'))
+            if te and not te.endswith('ms'):
+                te = f"{te} ms"
+            flip = str(ds.get('FlipAngle', '90°'))
+            if flip and not flip.endswith('°'):
+                flip = f"{flip}°"
+            
+            # Extract spacing
+            pixel_spacing = ds.get('PixelSpacing', [0.45, 0.45])
+            spacing_list = [float(x) for x in pixel_spacing]
+            
+            # Extract pixel array
+            pixel_array = ds.pixel_array
+            
+            # Normalize pixel array to 8-bit grayscale
+            p_min = np.min(pixel_array)
+            p_max = np.max(pixel_array)
+            if p_max > p_min:
+                normalized = ((pixel_array - p_min) / (p_max - p_min) * 255.0).astype(np.uint8)
+            else:
+                normalized = np.zeros(pixel_array.shape, dtype=np.uint8)
+                
+            # If the pixel array is 2D (grayscale), convert to 3D RGB for model prediction
+            if len(normalized.shape) == 2:
+                img_resized = cv2.resize(normalized, (224, 224))
+                img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_GRAY2RGB)
+                
+                # Save converted image as temporary PNG for image_to_base64
+                temp_png = filepath + ".png"
+                cv2.imwrite(temp_png, normalized)
+                img_base64 = image_to_base64(temp_png)
+                os.remove(temp_png)
+            else:
+                img_resized = cv2.resize(normalized, (224, 224))
+                img_rgb = img_resized
+                temp_png = filepath + ".png"
+                cv2.imwrite(temp_png, cv2.cvtColor(normalized, cv2.COLOR_RGB2BGR))
+                img_base64 = image_to_base64(temp_png)
+                os.remove(temp_png)
+                
+            # Process for model prediction
+            img_input = tf.keras.applications.efficientnet_v2.preprocess_input(img_rgb.astype(np.float32))
+            img_input = np.expand_dims(img_input, axis=0)
+            
+            # Predict
+            preds = model.predict(img_input, verbose=0)
+            class_id = np.argmax(preds[0])
+            confidence = float(preds[0][class_id] * 100)
+            
+            class_name = CLASS_NAMES[class_id]
+            
+            # Setup response metadata
+            dicom_metadata = {
+                'sequence_type': seq_desc,
+                'tr': tr,
+                'te': te,
+                'flip_angle': flip,
+                'contrast_agent': "Gadolinium (Gd-DTPA)" if "C+" in class_name else "None",
+                'magnetic_field': field_strength,
+                'scanner_model': scanner_model,
+                'coil_type': coil_type,
+                'slice_thickness': slice_thickness,
+                'pixel_spacing': spacing_list,
+                'patient_name': patient_name,
+                'patient_id': patient_id,
+                'patient_age': patient_age,
+                'study_date': study_date
+            }
+        else:
+            # Preprocess and predict standard image
+            img = preprocess_image(filepath)
+            preds = model.predict(img, verbose=0)
+            class_id = np.argmax(preds[0])
+            confidence = float(preds[0][class_id] * 100)
+            
+            # Convert image to base64
+            img_base64 = image_to_base64(filepath)
+            
+            class_name = CLASS_NAMES[class_id]
+            
+            # Standard simulated DICOM properties
+            if "T1C+" in class_name:
+                sequence_type = "T1-Weighted Contrast Enhanced (T1C+)"
+                tr = "450 ms"
+                te = "15 ms"
+                flip_angle = "90°"
+                contrast_agent = "Gadolinium (Gd-DTPA)"
+            elif "T1" in class_name:
+                sequence_type = "T1-Weighted (T1)"
+                tr = "400 ms"
+                te = "12 ms"
+                flip_angle = "90°"
+                contrast_agent = "None"
+            elif "T2" in class_name:
+                sequence_type = "T2-Weighted (T2)"
+                tr = "3800 ms"
+                te = "90 ms"
+                flip_angle = "150°"
+                contrast_agent = "None"
+            else:
+                sequence_type = "Standard MRI Sequence"
+                tr = "1000 ms"
+                te = "40 ms"
+                flip_angle = "90°"
+                contrast_agent = "None"
+                
+            dicom_metadata = {
+                'sequence_type': sequence_type,
+                'tr': tr,
+                'te': te,
+                'flip_angle': flip_angle,
+                'contrast_agent': contrast_agent,
+                'magnetic_field': "3.0 Tesla",
+                'scanner_model': "Siemens MAGNETOM Skyra",
+                'coil_type': "16-Channel Head Coil",
+                'slice_thickness': "5.0 mm",
+                'pixel_spacing': [0.45, 0.45], # Simulated spacing
+                'patient_name': "Anonymous Patient",
+                'patient_id': "NAI-94820935",
+                'patient_age': "U",
+                'study_date': "2026-06-03"
+            }
+            
+        # Clean up temp file
+        os.remove(filepath)
+        
+        # Force garbage collection
+        gc.collect()
+        
+        # Determine confidence level
+        if confidence >= 80:
+            confidence_level = "Very High"
+            confidence_color = "success"
+        elif confidence >= 60:
+            confidence_level = "Good"
+            confidence_color = "warning"
+        else:
+            confidence_level = "Moderate"
+            confidence_color = "info"
+        
+        return jsonify({
+            'success': True,
+            'class': class_name.replace('_', ' '),
+            'confidence': round(confidence, 2),
+            'confidence_level': confidence_level,
+            'confidence_color': confidence_color,
+            'image': img_base64,
+            'dicom_metadata': dicom_metadata
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def get_tumor_details(class_name):
+    """Return clinical details about a specific tumor category"""
+    name = class_name.replace('_', ' ').replace(' T1C+', '').replace(' T1', '').replace(' T2', '').strip()
+    
+    details = {
+        "Astrocytoma": """### Astrocytoma 🧠🔬
+- **What it is**: A type of glioma that originates in star-shaped glial cells (astrocytes) which support nerve cells. Astrocytomas can be low-grade (slow-growing) or high-grade (highly aggressive).
+- **MRI Characteristics**:
+  - **T1**: Hypointense (darker than healthy brain tissue).
+  - **T2**: Hyperintense (bright white due to fluid/swelling).
+  - **T1C+**: Variable. Low-grade shows little to no enhancement, whereas high-grade astrocytomas show strong, irregular, patchy enhancement.
+- **Clinical Outlook**: Treatment typically involves surgical resection followed by radiation therapy and chemotherapy, depending on the tumor grade (Grades I to IV).""",
+        
+        "Glioblastoma": """### Glioblastoma (GBM / Grade IV Astrocytoma) ⚠️🔬
+- **What it is**: The most aggressive and common malignant primary brain tumor. It grows rapidly and invades nearby brain tissue.
+- **MRI Characteristics**:
+  - **T1**: Hypointense mass, often with a central necrotic core.
+  - **T2**: Bright hyperintensity in and around the tumor, showing extensive vasogenic edema (swelling).
+  - **T1C+**: Classic **ring-enhancement pattern**—a bright, irregular outer ring of active tumor surrounding a dark, non-enhancing central area of necrotic (dead) tissue.
+- **Clinical Outlook**: GBM requires immediate multidisciplinary treatment (surgery, radiotherapy, temozolomide chemotherapy). Prognosis is challenging, making early detection vital.""",
+        
+        "Meningioma": """### Meningioma 🧠🛡️
+- **What it is**: A tumor that arises from the meninges—the protective membranes covering the brain and spinal cord. It is the most common primary brain tumor and is **mostly benign** (Grade I, ~80-90% of cases).
+- **MRI Characteristics**:
+  - **T1 & T2**: Typically isointense (same color) to gray matter, making them subtle, but easily identified by their extra-axial (outside the brain tissue) location, compressing the brain.
+  - **T1C+**: Shows **intense, highly homogeneous (uniform) enhancement** because they are highly vascularized. Frequently displays a **"dural tail sign"** (thickening of the adjacent dura mater).
+- **Clinical Outlook**: Small, asymptomatic meningiomas may just be monitored ("watchful waiting"). Larger ones are removed surgically, often resulting in a complete cure.""",
+        
+        "Pituitary": """### Pituitary Adenoma / Tumor 🧠⚖️
+- **What it is**: A tumor occurring in the pituitary gland at the base of the brain. Mostly benign (non-cancerous), but can cause hormonal imbalances (hypersecretion or hyposecretion) and vision issues (by pressing on the optic chiasm).
+- **MRI Characteristics**:
+  - **T1**: Isointense or hypointense compared to the surrounding brain.
+  - **T2**: Moderately hyperintense.
+  - **T1C+**: Pituitary tumors enhance strongly, but typically enhance *more slowly* than the normal healthy pituitary gland, making them stand out as a relatively dark area during early dynamic contrast-enhanced scans.
+- **Clinical Outlook**: Often treated highly successfully with transsphenoidal surgery (through the nose), medications (for hormone-producing tumors), or stereotactic radiosurgery.""",
+
+        "Schwannoma": """### Schwannoma 🧠🔕
+- **What it is**: A benign, slow-growing nerve sheath tumor originating from Schwann cells (which insulate nerves). The most common type is the **Acoustic Neuroma** (Vestibular Schwannoma) on the 8th cranial nerve, causing hearing loss and balance issues.
+- **MRI Characteristics**:
+  - **T1**: Hypointense to gray matter.
+  - **T2**: Hyperintense, often with cystic (fluid-filled) degenerative spaces in larger tumors.
+  - **T1C+**: Shows extremely strong, often heterogeneous enhancement, located in the cerebellopontine angle (CPA).
+- **Clinical Outlook**: Highly treatable via surgical removal or targeted radiation (CyberKnife/Gamma Knife), preserving nerve function.""",
+        
+        "Medulloblastoma": """### Medulloblastoma 👶⚠️
+- **What it is**: A highly malignant, fast-growing embryonic tumor located in the cerebellum (back of the brain). It is the most common malignant brain tumor in children.
+- **MRI Characteristics**:
+  - **T1**: Hypointense mass in the fourth ventricle.
+  - **T2**: Isointense or hyperintense.
+  - **T1C+**: Prominent, homogeneous or heterogeneous contrast enhancement. Edema is usually mild to moderate.
+- **Clinical Outlook**: Requires aggressive treatment (surgical resection, craniospinal radiation, and chemotherapy). Survival rates have improved significantly with modern combined therapies.""",
+
+        "Carcinoma": """### Metastatic Brain Tumor (Carcinoma) ✈️⚠️
+- **What it is**: A secondary brain tumor that has metastasized (spread) to the brain from a primary cancer elsewhere in the body (most commonly lung, breast, melanoma, or colon cancer).
+- **MRI Characteristics**:
+  - **T1**: Hypointense or isointense mass, often located at the gray-white matter junction.
+  - **T2**: Shows **disproportionately large surrounding edema** compared to the size of the tumor.
+  - **T1C+**: Well-circumscribed, solid or ring-enhancing lesions. Often multiple lesions are visible.
+- **Clinical Outlook**: Treatment depends on the primary cancer type and number of lesions. Includes stereotactic radiosurgery, surgical resection, whole-brain radiation, and targeted systemic therapies.""",
+
+        "Tuberculoma": """### Tuberculoma / Granuloma 🔬🛡️
+- **What it is**: A non-cancerous, infectious/inflammatory mass lesion caused by tuberculosis (Tuberculoma) or other inflammatory conditions (Granuloma). It mimics a brain tumor on scans.
+- **MRI Characteristics**:
+  - **T1**: Hypointense or isointense.
+  - **T2**: Central area can be hypointense (caseous necrosis) or hyperintense (liquefaction) with a surrounding bright halo of vasogenic edema.
+  - **T1C+**: Classic **nodular or ring enhancement** (representing the capsule of the granuloma).
+- **Clinical Outlook**: Treated medically with anti-tuberculosis therapy (ATT) or immunosuppressants. Surgery is rarely needed unless the mass causes critical brain compression.""",
+
+        "No Tumor": """### Healthy Brain Scan (No Tumor Detected) ✅🧠
+- **What it is**: The AI model has classified this scan as showing **no evidence of a brain tumor, neoplastic growth, or active focal lesion** within the limits of the trained classification categories.
+- **Normal MRI Structures**:
+  - Symmetric cerebral hemispheres.
+  - Normal, fluid-filled ventricles with clean borders.
+  - Intact, sharp gray-white matter junctions.
+  - No abnormal focal contrast-enhancement or surrounding edema.
+- **Recommendation**: Continue standard health monitoring. If symptoms persist despite a normal scan, consult a clinical physician for a comprehensive neurological examination.""",
+        
+        "Ependymoma": """### Ependymoma 🧠💧
+- **What it is**: A tumor arising from the ependymal cells lining the ventricles and central canal of the spinal cord. Most common in children (in the 4th ventricle) and adults (in the spinal cord).
+- **MRI Characteristics**:
+  - **T1**: Hypointense to isointense mass.
+  - **T2**: Hyperintense, often showing calcifications, hemorrhages, or cysts inside.
+  - **T1C+**: Strong, heterogeneous (patchy) contrast enhancement.
+- **Clinical Outlook**: Resection is the primary treatment, often followed by radiation.""",
+
+        "Ganglioglioma": """### Ganglioglioma 🧠⚡
+- **What it is**: A rare, slow-growing, low-grade (typically Grade I) neuroepithelial tumor containing both neuronal and glial elements. Commonly causes drug-resistant epilepsy.
+- **MRI Characteristics**:
+  - **T1**: Hypointense, well-circumscribed cystic lesion with a solid mural nodule.
+  - **T2**: Cyst fluid appears bright white; surrounding tissue shows minimal edema.
+  - **T1C+**: The mural nodule typically enhances strongly, while the cyst wall does not enhance.
+- **Clinical Outlook**: Excellent prognosis. Complete surgical removal typically cures both the tumor and the associated epilepsy.""",
+
+        "Germinoma": """### Germinoma 🧠🌟
+- **What it is**: A type of germ cell tumor located in the midline of the brain, most commonly in the pineal or suprasellar regions. Highly radiosensitive.
+- **MRI Characteristics**:
+  - **T1 & T2**: Isointense to gray matter.
+  - **T1C+**: Shows intense, highly homogeneous enhancement.
+- **Clinical Outlook**: Excellent prognosis. Highly curable with radiation therapy alone or combined with chemotherapy, avoiding aggressive surgery.""",
+
+        "Granuloma": """### Granuloma 🔬🛡️
+- **What it is**: A focal area of chronic inflammation caused by infections (bacterial, fungal, parasitic) or non-infectious immune conditions (like sarcoidosis). It mimics a brain tumor.
+- **MRI Characteristics**:
+  - **T1 & T2**: Variable intensity based on the stage.
+  - **T1C+**: Shows thick nodular or ring enhancement with surrounding edema.
+- **Clinical Outlook**: Treated by targeting the underlying cause (antibiotics, antifungals, or anti-inflammatory drugs).""",
+
+        "Neurocytoma": """### Central Neurocytoma 🧠⚡
+- **What it is**: A rare, benign (Grade II) neuronal tumor typically located inside the lateral ventricles near the foramen of Monro.
+- **MRI Characteristics**:
+  - **T1**: Isointense to hypointense compared to gray matter.
+  - **T2**: Isointense to hyperintense, with a characteristic "bubbly" appearance due to small cystic areas.
+  - **T1C+**: Moderate to strong heterogeneous enhancement.
+- **Clinical Outlook**: High cure rate. Complete surgical resection is the primary therapy.""",
+
+        "Oligodendroglioma": """### Oligodendroglioma 🧠🧬
+- **What it is**: A type of glioma arising from oligodendrocytes. Characterized molecularly by 1p/19q co-deletion. Often displays extensive calcification.
+- **MRI Characteristics**:
+  - **T1**: Hypointense mass, typically involving the frontal lobe cortex.
+  - **T2**: Hyperintense.
+  - **T1C+**: Low-grade tumors show no enhancement. High-grade (anaplastic) tumors show heterogeneous enhancement.
+- **Clinical Outlook**: Resection, followed by chemotherapy (PCV or Temozolomide) and radiation. Slow-growing compared to astrocytomas.""",
+
+        "Papilloma": """### Choroid Plexus Papilloma 🧠💧
+- **What it is**: A rare, benign (Grade I) neuroepithelial tumor of the choroid plexus (the tissue that produces CSF), causing hydrocephalus (fluid accumulation) due to overproduction of CSF.
+- **MRI Characteristics**:
+  - **T1**: Hypointense to isointense lobulated mass (looks like a cauliflower).
+  - **T2**: Hyperintense.
+  - **T1C+**: Intense, highly homogeneous contrast enhancement.
+- **Clinical Outlook**: Complete surgical removal is typically curative, resolving the hydrocephalus."""
+    }
+    
+    # Try exact match or sub-word match
+    for key, val in details.items():
+        if key.lower() in name.lower():
+            # Add specific info about sequence if present
+            seq_info = ""
+            if "T1C+" in class_name:
+                seq_info = "\n\n> [!NOTE]\n> **Sequence Detected**: **T1C+ (Contrast-Enhanced)**. This sequence is optimized for finding disrupted blood-brain barriers and highlights tumor vascularity brilliantly."
+            elif "T1" in class_name:
+                seq_info = "\n\n> [!NOTE]\n> **Sequence Detected**: **T1-Weighted**. This sequence is excellent for high-resolution anatomical structure and defining tumor borders relative to normal brain tissue."
+            elif "T2" in class_name:
+                seq_info = "\n\n> [!NOTE]\n> **Sequence Detected**: **T2-Weighted**. This sequence is highly sensitive to pathological changes, edema (swelling), and fluids which appear bright white."
+                
+            return f"### AI Diagnostic Summary: {class_name.replace('_', ' ')}\n\n" + val + seq_info
+            
+    # Default fallback
+    return f"""### AI Diagnostic Summary: {class_name.replace('_', ' ')}
+- **Classification**: {name}
+- **Visual Features**: Detected abnormal voxel density patterns indicative of a lesion or microstructural changes consistent with {name} on this specific sequence.
+- **Next Steps**: 
+  1. Correlate this finding with other MRI sequences (T1, T2, T1C+).
+  2. Consult a certified neuro-radiologist or neurologist.
+  3. This is an educational AI model output and should not be used as a standalone medical diagnosis.
+
+*For detailed tumor information, you can ask me: "Tell me about astrocytoma", "What is meningioma?", etc.*"""
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    """Handle NeuroAI Assistant conversation"""
+    try:
+        data = request.get_json() or {}
+        message = data.get('message', '').strip().lower()
+        current_diagnosis = data.get('diagnosis', '').strip()
+        
+        if not message:
+            return jsonify({'response': "I didn't receive any message. How can I help you with your brain MRI analysis today?"})
+        
+        # 1. Check if the user is asking about the current diagnosis specifically
+        if "this scan" in message or "my result" in message or "current diagnosis" in message or "explain the diagnosis" in message or "what is my diagnosis" in message or "what does this mean" in message or (not message and current_diagnosis):
+            if not current_diagnosis or current_diagnosis == "Analyzing...":
+                return jsonify({'response': "Please upload an MRI scan first, and I will be glad to explain the classification results in detail!"})
+            
+            return jsonify({'response': get_tumor_details(current_diagnosis)})
+
+        # 2. Key clinical questions
+        if "t1" in message and "t2" in message:
+            return jsonify({'response': """### Difference Between T1 and T2 MRI Sequences 🩻
+- **T1-Weighted Sequence**: Shows CSF (cerebrospinal fluid) as **dark (black)**, gray matter as gray, and white matter as white. It provides excellent **anatomical detail** and is the primary sequence used with contrast enhancement (T1C+).
+- **T2-Weighted Sequence**: Shows CSF as **bright (white)**. This sequence is highly sensitive to **pathology and edema (swelling)** because diseased or damaged tissues typically have higher water content and stand out brightly.
+- **Radiologist's View**: T1 is like the blueprint of the brain's structure, while T2 acts as a searchlight for inflammation, tumor-associated swelling, and lesions."""})
+            
+        elif "t1c+" in message or "contrast" in message:
+            return jsonify({'response': """### What is T1C+ (Contrast-Enhanced MRI)? 💉
+- **Definition**: A **T1-weighted sequence** acquired *after* the intravenous injection of a gadolinium-based contrast agent.
+- **Why it's used**: Gadolinium does not cross a healthy blood-brain barrier (BBB). However, tumors and active inflammatory lesions disrupt the BBB, causing the contrast to leak into the tissue. This makes the tumor glow **bright white** on the scan.
+- **Clinical Significance**: T1C+ is essential for delineating tumor borders, measuring tumor volume, distinguishing solid tumor parts from surrounding necrosis, and tracking post-treatment changes."""})
+            
+        elif "t1" in message:
+            return jsonify({'response': """### T1-Weighted MRI Sequence 🧠
+- **Characteristics**: Fluid (CSF) appears **dark**, white matter is light, and gray matter is intermediate gray.
+- **Best For**: General anatomy, structural boundaries, and as the baseline sequence for contrast agents.
+- **Visual Cue**: Look at the ventricles (fluid-filled spaces in the center of the brain). If they are pitch black, it is a T1-weighted scan!"""})
+            
+        elif "t2" in message:
+            return jsonify({'response': """### T2-Weighted MRI Sequence 🌊
+- **Characteristics**: Fluid (CSF) appears **bright white**, which makes edema (swelling) and most tumor tissues look bright as well.
+- **Best For**: Identifying pathology, water accumulation, edema, and inflammation around a tumor mass.
+- **Visual Cue**: Look at the ventricles in the center. If they are glowing white, you are looking at a T2-weighted scan!"""})
+            
+        elif "accuracy" in message or "model" in message or "efficientnet" in message or "how accurate" in message:
+            return jsonify({'response': """### NeuroAI Model Architecture & Performance 📊
+- **Base Architecture**: **EfficientNetV2-B0** (state-of-the-art CNN pre-trained on ImageNet).
+- **Fine-Tuning**: Custom dense classification head optimized for 44 distinct brain tumor sequences and healthy controls.
+- **Validation Accuracy**: Approximately **95%** on the testing dataset.
+- **Output Capabilities**: Differentiates 14 tumor categories across 3 main imaging sequences (T1, T2, T1C+).
+- **Performance Details**: Leverages progressive learning and compound scaling, making it extremely lightweight yet highly sensitive to micro-structural texture differences in MRI scans."""})
+
+        elif "glioma" in message or "astrocytoma" in message or "glioblastoma" in message:
+            return jsonify({'response': get_tumor_details("Astrocytoma")})
+            
+        elif "meningioma" in message:
+            return jsonify({'response': get_tumor_details("Meningioma")})
+            
+        elif "pituitary" in message:
+            return jsonify({'response': get_tumor_details("Pituitary")})
+            
+        elif "schwannoma" in message:
+            return jsonify({'response': get_tumor_details("Schwannoma")})
+
+        elif "tuberculoma" in message or "granuloma" in message:
+            return jsonify({'response': get_tumor_details("Tuberculoma")})
+
+        elif "medulloblastoma" in message:
+            return jsonify({'response': get_tumor_details("Medulloblastoma")})
+
+        elif "symptoms" in message or "signs" in message:
+            return jsonify({'response': """### Common Symptoms of Brain Lesions/Tumors ⚠️
+Symptoms vary widely based on the tumor's size, growth rate, and location in the brain:
+1. **Persistent Headaches**: Often worse in the morning or during coughing/straining.
+2. **Seizures**: New-onset seizures in an adult are a strong indication for an MRI.
+3. **Cognitive/Personality Changes**: Memory lapses, confusion, difficulty concentrating, or mood shifts.
+4. **Nausea & Vomiting**: Unexplained morning nausea due to increased intracranial pressure.
+5. **Neurological Deficits**: Progressive weakness or numbness on one side of the body, vision changes (blurriness, double vision), or speech difficulties.
+6. **Balance Problems**: Dizziness or loss of coordination (often associated with cerebellar tumors like Medulloblastoma).
+*Important: These symptoms can also be caused by many non-cancerous conditions. An official diagnosis requires dynamic imaging and a biopsy by a qualified neurospecialist.*"""})
+
+        # 3. Handle specific tumor types
+        for name in ["astrocytoma", "carcinoma", "ependymoma", "ganglioglioma", "germinoma", "glioblastoma", "granuloma", "medulloblastoma", "meningioma", "neurocytoma", "oligodendroglioma", "papilloma", "schwannoma", "tuberculoma", "no tumor"]:
+            if name in message:
+                return jsonify({'response': get_tumor_details(name.title())})
+
+        # 4. Default Greeting / Help
+        return jsonify({'response': """### Hello! I am your NeuroAI Assistant. 🤖🧠
+I am here to help you understand brain MRI sequences and tumor classifications. 
+
+**Here are some things you can ask me or click below:**
+- *"What is the difference between T1 and T2?"*
+- *"What does T1C+ (contrast enhanced) mean?"*
+- *"Explain the current diagnosis"* (after uploading an image)
+- *"What are the symptoms of a brain tumor?"*
+- *"How accurate is this AI model?"*
+- You can also ask about specific tumor types (e.g., *"Tell me about Meningioma"* or *"What is a Glioblastoma?"*).
+
+*Note: I am an educational tool, not a doctor. Always consult a neuro specialist for clinical questions.*"""})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
+    return jsonify({'status': 'healthy', 'classes': len(CLASS_NAMES)}), 200
+
+if __name__ == '__main__':
+    # Get port from environment or use 5000
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)

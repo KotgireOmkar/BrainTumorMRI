@@ -1,0 +1,16 @@
+# Backend
+Flask==2.3.3
+gunicorn==21.2.0
+Werkzeug==2.3.7
+
+# Machine Learning
+tensorflow>=2.16.0,<2.17.0
+
+# Image Analytics
+pydicom==2.4.3
+opencv-python==4.8.1.78
+Pillow==10.0.0
+
+# Frontend & Core
+numpy==1.26.4
+h5py==3.8.0
