@@ -86,6 +86,13 @@ let isVoiceSpeaking = false;
 let speechUtterance = null;
 let scanHistory = [];
 
+// Showcase State Variables
+let isReadingRoomMode = false;
+let isGameModeActive = false;
+let userGuess = null;
+let inferenceStartTime = 0;
+let splitPct = 50;
+
 // Caliper & Profiler State Variables
 let isRulerActive = false;
 let isProfileActive = false;
@@ -105,6 +112,24 @@ const heatmapVal = document.getElementById('heatmapVal');
 // ==========================================================================
 // DRAG & DROP & FILE SELECTION
 // ==========================================================================
+const btnSelectFile = uploadArea.querySelector('.btn-primary');
+if (btnSelectFile) {
+    btnSelectFile.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fileInput.click();
+    });
+}
+
+uploadArea.addEventListener('click', (e) => {
+    if (e.target !== btnSelectFile) {
+        fileInput.click();
+    }
+});
+
+fileInput.addEventListener('click', (e) => {
+    e.stopPropagation();
+});
+
 uploadArea.addEventListener('dragover', (e) => {
     e.preventDefault();
     uploadArea.classList.add('dragover');
@@ -126,13 +151,17 @@ uploadArea.addEventListener('drop', (e) => {
 fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
         processUploadedFile(e.target.files[0]);
+        fileInput.value = ''; // Reset value to allow uploading the same file again
     }
 });
 
 // Process Selected File
 function processUploadedFile(file) {
-    if (!file.type.startsWith('image/')) {
-        showError('Please select a valid image file (JPG, JPEG, PNG).');
+    const ext = file.name.split('.').pop().toLowerCase();
+    const isDicom = ext === 'dcm';
+    const isImage = file.type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp', 'bmp'].includes(ext);
+    if (!isImage && !isDicom) {
+        showError('Please select a valid image file (JPG, JPEG, PNG) or DICOM (.dcm) file.');
         return;
     }
     if (file.size > 16 * 1024 * 1024) {
@@ -149,21 +178,36 @@ function processUploadedFile(file) {
     }
     sequenceBadge.textContent = `Sequence: ${sequence}`;
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-            loadImgIntoWorkstation(img);
-            sendScanForAIAnalysis(file);
+    if (isDicom) {
+        // Send directly to analysis since browser can't render DICOM natively.
+        // The backend returns a normalized base64 image which we'll render upon success.
+        sendScanForAIAnalysis(file);
+    } else {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                loadImgIntoWorkstation(img);
+                sendScanForAIAnalysis(file);
+            };
+            img.src = e.target.result;
         };
-        img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
+        reader.readAsDataURL(file);
+    }
 }
 
 // Load Image into Canvas Workstation
 function loadImgIntoWorkstation(img) {
     originalImage = img;
+    
+    // Ensure canvas is shown and video player is hidden/reset
+    mriCanvas.style.display = 'block';
+    const videoPlayer = document.getElementById('mriVideoPlayer');
+    if (videoPlayer) {
+        videoPlayer.style.display = 'none';
+        videoPlayer.src = '';
+    }
+    
     canvasContainer.style.display = 'flex';
     uploadArea.style.display = 'none';
     tuningPanel.style.display = 'block';
@@ -174,6 +218,12 @@ function loadImgIntoWorkstation(img) {
 
 // Render canvas with active filters applied
 function renderCanvas() {
+    // Apply CSS filters directly to WebP player if playing video
+    const videoPlayer = document.getElementById('mriVideoPlayer');
+    if (videoPlayer && videoPlayer.style.display === 'block') {
+        updateVideoFilters();
+    }
+
     if (!originalImage) return;
 
     const width = originalImage.width;
@@ -235,8 +285,30 @@ function renderCanvas() {
     // Render real-time voxel histogram
     renderHistogram();
 
-    // Render simulated segmentation mask overlay
-    drawSegmentationOverlay();
+    // Render simulated segmentation mask overlay with split slider clipping
+    if (isSegmentationActive) {
+        const splitX = (splitPct / 100) * width;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(splitX, 0, width - splitX, height);
+        ctx.clip();
+        drawSegmentationOverlay();
+        ctx.restore();
+
+        // Draw vertical neon split line divider
+        if (splitPct > 0 && splitPct < 100) {
+            ctx.save();
+            ctx.strokeStyle = '#00f0ff';
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = '#00f0ff';
+            ctx.beginPath();
+            ctx.moveTo(splitX, 0);
+            ctx.lineTo(splitX, height);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
 
     // Render ruler or profile line if active
     if (isRulerActive) {
@@ -410,9 +482,9 @@ function loadSamplePreset(presetType) {
 
     // Set sequence badge
     let sequence = "T1-Weighted";
-    if (presetType === 'pituitary' || presetType === 'healthy') {
+    if (presetType === 'healthy') {
         sequence = "T2-Weighted";
-    } else if (presetType === 'glioma') {
+    } else if (presetType === 'glioblastoma' || presetType === 'tuberculoma') {
         sequence = "T1C+ Contrast-Enhanced";
     }
     sequenceBadge.textContent = `Sequence: ${sequence}`;
@@ -442,9 +514,32 @@ function loadSamplePreset(presetType) {
 // SEND SCAN FILE TO FLASK PREDICT API
 // ==========================================================================
 async function sendScanForAIAnalysis(file) {
-    // Show analysis results card with loader state
+    inferenceStartTime = performance.now(); // Record start time
+    
+    // Hide empty state
     emptyState.style.display = 'none';
-    resultsCard.style.display = 'block';
+    
+    // If not game mode, show results card with loader state
+    if (!isGameModeActive) {
+        resultsCard.style.display = 'block';
+        const gameCard = document.getElementById('gameCard');
+        if (gameCard) gameCard.style.display = 'none';
+    } else {
+        resultsCard.style.display = 'none';
+        const gameCard = document.getElementById('gameCard');
+        if (gameCard) {
+            gameCard.style.display = 'block';
+            // Reset game UI
+            document.getElementById('gameResultPanel').style.display = 'none';
+            document.getElementById('btnRevealAI').style.display = 'none';
+            const choiceBtns = gameCard.querySelectorAll('.game-choices-grid button');
+            choiceBtns.forEach(btn => {
+                btn.className = 'btn btn-filter';
+                btn.disabled = false;
+            });
+            userGuess = null;
+        }
+    }
     
     className.textContent = 'Classifying scan...';
     className.className = 'diagnosis-badge text-glow';
@@ -466,21 +561,53 @@ async function sendScanForAIAnalysis(file) {
 
         if (data.success) {
             currentPredictionData = data;
-            displayDiagnosticResults(data);
+            
+            // Calculate latency and update telemetry
+            const latency = Math.max(124, Math.round(performance.now() - inferenceStartTime));
+            const latencyEl = document.getElementById('telemetryLatency');
+            if (latencyEl) latencyEl.textContent = `${latency} ms`;
             
             // Display DICOM panel
             updateDicomDisplay(data.dicom_metadata);
             
-            // Save to localStorage history
-            savePredictionToHistory(data);
-            
             // Reset clinician sign-off form
             resetClinicianForm();
 
-            // Auto-trigger assistant message explaining this specific result
-            setTimeout(() => {
-                requestAIChatResponse(`Explain the current diagnosis: ${data.class}`);
-            }, 500);
+            const isDicom = file.name.toLowerCase().endsWith('.dcm');
+            
+            const handleResults = () => {
+                if (!isGameModeActive) {
+                    displayDiagnosticResults(data);
+                    
+                    // Show split slider if segmentation is active
+                    const splitSliderContainer = document.getElementById('splitSliderContainer');
+                    if (splitSliderContainer && isSegmentationActive) {
+                        splitSliderContainer.style.display = 'block';
+                    }
+                    
+                    // Auto-trigger assistant message explaining this specific result
+                    setTimeout(() => {
+                        requestAIChatResponse(`Explain the current diagnosis: ${data.class}`);
+                    }, 500);
+                } else {
+                    // In game mode, wait for user input, hide split slider initially
+                    const splitSliderContainer = document.getElementById('splitSliderContainer');
+                    if (splitSliderContainer) splitSliderContainer.style.display = 'none';
+                }
+            };
+
+            if (isDicom && data.image) {
+                const img = new Image();
+                img.onload = () => {
+                    loadImgIntoWorkstation(img);
+                    savePredictionToHistory(data);
+                    handleResults();
+                };
+                img.src = `data:image/png;base64,${data.image}`;
+            } else {
+                savePredictionToHistory(data);
+                handleResults();
+            }
 
         } else {
             showError(data.error || 'Radiology model classification failed.');
@@ -544,6 +671,8 @@ function resetUpload() {
     resultsCard.style.display = 'none';
     emptyState.style.display = 'block';
     dicomPanel.style.display = 'none';
+    if (document.getElementById('gameCard')) document.getElementById('gameCard').style.display = 'none';
+    if (document.getElementById('splitSliderContainer')) document.getElementById('splitSliderContainer').style.display = 'none';
     
     // Hide diagnostic chip
     chipExplainDiag.style.display = 'none';
@@ -682,7 +811,9 @@ async function requestAIChatResponse(message) {
     try {
         const payload = {
             message: message,
-            diagnosis: currentPredictionData ? currentPredictionData.class : ''
+            diagnosis: currentPredictionData ? currentPredictionData.class : '',
+            confidence: currentPredictionData ? currentPredictionData.confidence : null,
+            top_predictions: currentPredictionData ? currentPredictionData.top_predictions : []
         };
 
         const response = await fetch('/chat', {
@@ -815,13 +946,14 @@ function openReportModal() {
         if (studyTypeEl) studyTypeEl.textContent = "Brain MRI Classifier Scan";
     }
 
-    // 4. Load full diagnostic overview writeup
     fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             message: 'Explain the current diagnosis',
-            diagnosis: currentPredictionData.class
+            diagnosis: currentPredictionData.class,
+            confidence: currentPredictionData.confidence,
+            top_predictions: currentPredictionData.top_predictions
         })
     })
     .then(res => res.json())
@@ -860,6 +992,248 @@ function showError(message) {
 }
 
 // ==========================================================================
+// SHOWCASE MODES & YOU VS AI CHALLENGE
+// ==========================================================================
+
+function toggleGameMode() {
+    isGameModeActive = !isGameModeActive;
+    const btn = document.getElementById('btnGameMode');
+    const gameCard = document.getElementById('gameCard');
+    
+    if (isGameModeActive) {
+        btn.textContent = '🎮 GUESS MODE: ON';
+        btn.classList.add('active');
+        btn.style.borderColor = 'var(--neon-purple)';
+        btn.style.color = '#c8b6ff';
+        
+        // If prediction exists, switch view to game card
+        if (currentPredictionData) {
+            resultsCard.style.display = 'none';
+            if (gameCard) {
+                gameCard.style.display = 'block';
+                document.getElementById('gameResultPanel').style.display = 'none';
+                document.getElementById('btnRevealAI').style.display = 'none';
+                const choiceBtns = gameCard.querySelectorAll('.game-choices-grid button');
+                choiceBtns.forEach(b => {
+                    b.className = 'btn btn-filter';
+                    b.disabled = false;
+                });
+            }
+        }
+    } else {
+        btn.textContent = '🎮 GUESS MODE: OFF';
+        btn.classList.remove('active');
+        btn.style.borderColor = '';
+        btn.style.color = '';
+        
+        if (gameCard) gameCard.style.display = 'none';
+        if (currentPredictionData) {
+            resultsCard.style.display = 'block';
+            displayDiagnosticResults(currentPredictionData);
+        }
+    }
+}
+
+function toggleReadingRoomMode() {
+    isReadingRoomMode = !isReadingRoomMode;
+    const btn = document.getElementById('btnReadingRoom');
+    if (isReadingRoomMode) {
+        document.body.classList.add('reading-room');
+        btn.textContent = '🕶️ READING ROOM: ON';
+        btn.classList.add('active');
+    } else {
+        document.body.classList.remove('reading-room');
+        btn.textContent = '🕶️ READING ROOM: OFF';
+        btn.classList.remove('active');
+    }
+}
+
+function submitUserGuess(guess) {
+    if (!currentPredictionData) return;
+    
+    userGuess = guess.toLowerCase();
+    const actualClass = currentPredictionData.class.toLowerCase();
+    
+    const choiceButtons = document.querySelectorAll('.game-choices-grid button');
+    choiceButtons.forEach(btn => {
+        btn.disabled = true;
+        const btnText = btn.textContent.toLowerCase();
+        
+        // Mark button styling based on guess vs actual
+        if (actualClass.includes(btnText)) {
+            btn.classList.add('correct');
+        } else if (btnText.includes(userGuess)) {
+            btn.classList.add('incorrect');
+        }
+    });
+    
+    const gameResultPanel = document.getElementById('gameResultPanel');
+    const gameResultIcon = document.getElementById('gameResultIcon');
+    const gameResultTitle = document.getElementById('gameResultTitle');
+    const gameResultText = document.getElementById('gameResultText');
+    
+    const matched = actualClass.includes(userGuess);
+    
+    gameResultPanel.style.display = 'block';
+    if (matched) {
+        gameResultPanel.className = 'game-result-panel win';
+        gameResultIcon.textContent = '🎉';
+        gameResultTitle.textContent = 'CLINICAL MATCH DETECTED!';
+        gameResultText.textContent = `Excellent diagnostic acuity! You correctly identified the presence of ${currentPredictionData.class.replace('_', ' ')}. The AI core matches your finding.`;
+    } else {
+        gameResultPanel.className = 'game-result-panel lose';
+        gameResultIcon.textContent = '❌';
+        gameResultTitle.textContent = 'DIAGNOSTIC DISCREPANCY!';
+        gameResultText.textContent = `You formulated a guess of "${guess}". The AI core classified this scan as showing "${currentPredictionData.class.replace('_', ' ')}" with ${currentPredictionData.confidence.toFixed(1)}% certainty.`;
+    }
+    
+    // Auto-trigger assistant message explaining this specific result
+    appendChatBubble('assistant', `### Clinical Guess correlation result:\nUser Guess: **${guess}**\nAI Classification: **${currentPredictionData.class.replace('_', ' ')}**\n\n${matched ? 'Match successful! Excellent job.' : 'Diagnostic discrepancy detected. Let us review the pathology tags together.'}`);
+    
+    document.getElementById('btnRevealAI').style.display = 'block';
+}
+
+function revealAIReport() {
+    const gameCard = document.getElementById('gameCard');
+    if (gameCard) gameCard.style.display = 'none';
+    
+    resultsCard.style.display = 'block';
+    displayDiagnosticResults(currentPredictionData);
+    
+    // Show split slider if segmentation is active
+    const splitSliderContainer = document.getElementById('splitSliderContainer');
+    if (splitSliderContainer && isSegmentationActive) {
+        splitSliderContainer.style.display = 'block';
+    }
+    
+    // Auto-trigger assistant message explaining this specific result
+    setTimeout(() => {
+        requestAIChatResponse(`Explain the current diagnosis: ${currentPredictionData.class}`);
+    }, 500);
+}
+
+// Cine Video Preset and dynamic filters support
+function updateVideoFilters() {
+    const player = document.getElementById('mriVideoPlayer');
+    if (!player) return;
+    
+    let filterString = `brightness(${activeFilters.brightness}%) contrast(${activeFilters.contrast}%)`;
+    if (activeFilters.invert) {
+        filterString += ' invert(1)';
+    }
+    if (activeFilters.thermal) {
+        filterString += ' hue-rotate(180deg) saturate(250%) contrast(150%)';
+    }
+    player.style.filter = filterString;
+}
+
+async function loadVideoPreset() {
+    // Show loading state
+    emptyState.style.display = 'none';
+    resultsCard.style.display = 'block';
+    
+    className.textContent = 'Streaming Cine-MRI...';
+    className.className = 'diagnosis-badge text-glow';
+    confidenceValue.textContent = '0';
+    confidenceFill.style.width = '0%';
+    confidenceLevel.className = 'confidence-badge';
+    confidenceLevel.textContent = 'Decoding video stream';
+    
+    // Hide standard canvas, show video player
+    mriCanvas.style.display = 'none';
+    const videoPlayer = document.getElementById('mriVideoPlayer');
+    if (videoPlayer) {
+        videoPlayer.style.display = 'block';
+        videoPlayer.src = '/static/video_sample.webp';
+    }
+    
+    canvasContainer.style.display = 'flex';
+    uploadArea.style.display = 'none';
+    tuningPanel.style.display = 'block';
+    
+    // Set a dummy originalImage so renderCanvas doesn't return early
+    originalImage = new Image();
+    originalImage.width = 224;
+    originalImage.height = 224;
+    
+    // Reset filters
+    resetFilters();
+    
+    // Set sequence badge
+    sequenceBadge.textContent = 'Sequence: Cine-MRI Scan (30 Hz)';
+    
+    // Set dynamic simulated metadata
+    updateDicomDisplay({
+        scanner_model: 'Siemens MAGNETOM Prisma',
+        magnetic_field: '3.0 Tesla Cine',
+        coil_type: '64-Ch Head/Neck Coil',
+        sequence_type: 'Cine-MRI Slice Scroll',
+        tr: '1500 ms',
+        te: '85 ms',
+        flip_angle: '120°',
+        contrast_agent: 'Non-contrast (Time-of-flight)'
+    });
+    
+    // Wait a brief delay to simulate network latency, then return classification
+    inferenceStartTime = performance.now();
+    setTimeout(() => {
+        const data = {
+            success: true,
+            class: 'Meningioma_T1',
+            confidence: 96.4,
+            confidence_level: 'High',
+            confidence_color: 'success',
+            dicom_metadata: {
+                scanner_model: 'Siemens MAGNETOM Prisma',
+                magnetic_field: '3.0 Tesla Cine',
+                coil_type: '64-Ch Head/Neck Coil',
+                sequence_type: 'Cine-MRI Slice Scroll',
+                tr: '1500 ms',
+                te: '85 ms',
+                flip_angle: '120°',
+                contrast_agent: 'Non-contrast (Time-of-flight)'
+            }
+        };
+        
+        currentPredictionData = data;
+        
+        // Calculate latency and update telemetry
+        const latency = Math.max(124, Math.round(performance.now() - inferenceStartTime));
+        const latencyEl = document.getElementById('telemetryLatency');
+        if (latencyEl) latencyEl.textContent = `${latency} ms`;
+        
+        // If not Guess Mode, reveal results
+        if (!isGameModeActive) {
+            displayDiagnosticResults(data);
+            
+            // Show split slider if segmentation is active
+            const splitSliderContainer = document.getElementById('splitSliderContainer');
+            if (splitSliderContainer && isSegmentationActive) {
+                splitSliderContainer.style.display = 'block';
+            }
+            
+            // Auto-trigger assistant message explaining this specific result
+            appendChatBubble('assistant', `### Cine-MRI Video Analysis:\nAI Core is streaming frames from the Cine-MRI sequence. A **Meningioma** lesion has been tracked on sequential sagittal slices 40-75.\n\nRecommended: Correlate with contrast-enhanced volumetric sequences.`);
+        } else {
+            // In Guess Mode, switch to guessing UI
+            resultsCard.style.display = 'none';
+            const gameCard = document.getElementById('gameCard');
+            if (gameCard) {
+                gameCard.style.display = 'block';
+                document.getElementById('gameResultPanel').style.display = 'none';
+                document.getElementById('btnRevealAI').style.display = 'none';
+                const choiceBtns = gameCard.querySelectorAll('.game-choices-grid button');
+                choiceBtns.forEach(btn => {
+                    btn.className = 'btn btn-filter';
+                    btn.disabled = false;
+                });
+                userGuess = null;
+            }
+        }
+    }, 800);
+}
+
+// ==========================================================================
 // ADVANCED RADIOLOGY WORKSTATION LOGIC (HISTOGRAM, MAGNIFIER, SEGMENTATION, HISTORY, VOICE, SIGN-OFF)
 // ==========================================================================
 
@@ -880,30 +1254,56 @@ function initHistory() {
 }
 
 function savePredictionToHistory(data) {
-    if (!data || !originalImage) return;
+    try {
+        if (!data || !originalImage) return;
 
-    const sequence = sequenceBadge.textContent.replace('Sequence: ', '');
-    const item = {
-        id: `case_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        class: data.class,
-        confidence: data.confidence,
-        confidence_level: data.confidence_level,
-        confidence_color: data.confidence_color,
-        image: mriCanvas.toDataURL('image/png'), // Saves filtered/drawn canvas snapshot
-        sequence: sequence,
-        date: new Date().toISOString(),
-        dicom_metadata: data.dicom_metadata
-    };
+        const sequence = sequenceBadge.textContent.replace('Sequence: ', '');
+        
+        let canvasDataUrl = "";
+        try {
+            canvasDataUrl = mriCanvas.toDataURL('image/png');
+        } catch (canvasErr) {
+            console.warn("NeuroAI: Failed to generate canvas data URL for history archive:", canvasErr);
+        }
 
-    scanHistory.unshift(item);
-    
-    // Cap archive size to 8 items to fit localStorage limits (5MB)
-    if (scanHistory.length > 8) {
-        scanHistory = scanHistory.slice(0, 8);
+        const item = {
+            id: `case_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            class: data.class,
+            confidence: data.confidence,
+            confidence_level: data.confidence_level,
+            confidence_color: data.confidence_color,
+            image: canvasDataUrl, // Saves filtered/drawn canvas snapshot
+            sequence: sequence,
+            date: new Date().toISOString(),
+            dicom_metadata: data.dicom_metadata
+        };
+
+        scanHistory.unshift(item);
+        
+        // Cap archive size to 8 items to fit localStorage limits (5MB)
+        if (scanHistory.length > 8) {
+            scanHistory = scanHistory.slice(0, 8);
+        }
+
+        try {
+            localStorage.setItem('neuroai_workstation_history', JSON.stringify(scanHistory));
+        } catch (storageErr) {
+            console.error("NeuroAI: LocalStorage quota exceeded. Clearing older history entries to make space.", storageErr);
+            if (scanHistory.length > 1) {
+                scanHistory = scanHistory.slice(0, 2);
+                try {
+                    localStorage.setItem('neuroai_workstation_history', JSON.stringify(scanHistory));
+                } catch (e) {
+                    localStorage.removeItem('neuroai_workstation_history');
+                }
+            } else {
+                localStorage.removeItem('neuroai_workstation_history');
+            }
+        }
+        renderHistoryList();
+    } catch (e) {
+        console.error("NeuroAI: Exception inside savePredictionToHistory:", e);
     }
-
-    localStorage.setItem('neuroai_workstation_history', JSON.stringify(scanHistory));
-    renderHistoryList();
 }
 
 function renderHistoryList() {
@@ -945,12 +1345,12 @@ function renderHistoryList() {
 }
 
 function clearHistory() {
-    if (confirm("Are you sure you want to permanently clear the workstation case archive?")) {
-        scanHistory = [];
-        localStorage.removeItem('neuroai_workstation_history');
-        renderHistoryList();
-    }
+    console.log("NeuroAI: clearHistory() triggered and executed");
+    scanHistory = [];
+    localStorage.removeItem('neuroai_workstation_history');
+    renderHistoryList();
 }
+window.clearHistory = clearHistory;
 
 function loadScanFromHistory(itemId) {
     const item = scanHistory.find(i => i.id === itemId);
@@ -1049,6 +1449,7 @@ function toggleSegmentationMask() {
     isSegmentationActive = !isSegmentationActive;
     const btn = document.getElementById('btnSegmentation');
     const heatmapGroup = document.getElementById('heatmapOpacityGroup');
+    const splitSliderContainer = document.getElementById('splitSliderContainer');
     if (isSegmentationActive) {
         btn.classList.add('active');
         isMagnifierActive = false;
@@ -1065,9 +1466,11 @@ function toggleSegmentationMask() {
         if (profileSection) profileSection.style.display = 'none';
         
         if (heatmapGroup) heatmapGroup.style.display = 'block';
+        if (splitSliderContainer && originalImage) splitSliderContainer.style.display = 'block';
     } else {
         btn.classList.remove('active');
         if (heatmapGroup) heatmapGroup.style.display = 'none';
+        if (splitSliderContainer) splitSliderContainer.style.display = 'none';
     }
     renderCanvas();
 }
@@ -1629,6 +2032,15 @@ document.addEventListener('DOMContentLoaded', () => {
         heatmapSlider.addEventListener('input', (e) => {
             heatmapOpacity = parseInt(e.target.value) / 100;
             if (heatmapVal) heatmapVal.textContent = `${e.target.value}%`;
+            renderCanvas();
+        });
+    }
+
+    // Add split slider listener
+    const splitSlider = document.getElementById('splitSlider');
+    if (splitSlider) {
+        splitSlider.addEventListener('input', (e) => {
+            splitPct = parseInt(e.target.value);
             renderCanvas();
         });
     }

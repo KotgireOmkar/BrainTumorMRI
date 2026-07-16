@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,13 +8,16 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800&family=Outfit:wght@300;400;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='1.1') }}">
 </head>
+
 <body>
     <div class="gradient-bg"></div>
     <div class="grid-overlay"></div>
-    
+
     <div class="container">
         <!-- Modern Header -->
         <header class="header animate-down">
@@ -26,6 +30,12 @@
                 <p class="subtitle">Advanced Radiology Diagnostic Workstation & Assistant</p>
             </div>
             <div class="system-status">
+                <button class="btn btn-outline" id="btnReadingRoom" onclick="toggleReadingRoomMode()"
+                    style="padding: 6px 12px; font-size: 11px; display: flex; align-items: center; gap: 5px; background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.1); margin-right: 5px; height: 32px;">🕶️
+                    READING ROOM: OFF</button>
+                <button class="btn btn-outline" id="btnGameMode" onclick="toggleGameMode()"
+                    style="padding: 6px 12px; font-size: 11px; display: flex; align-items: center; gap: 5px; background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.1); margin-right: 15px; height: 32px;">🎮
+                    GUESS MODE: OFF</button>
                 <span class="status-indicator online"></span>
                 <span class="status-text">AI Core: Online</span>
             </div>
@@ -33,7 +43,7 @@
 
         <!-- Main Workspace Grid -->
         <main class="main-content">
-            
+
             <!-- LEFT COLUMN: MRI Viewport & Image Processing -->
             <section class="workspace-column left-pane animate-fade">
                 <div class="card glass-card viewer-card">
@@ -41,24 +51,26 @@
                         <h3><span class="icon">🎛️</span> MRI ANALYZER VIEWPORT</h3>
                         <span class="badge sequence-badge" id="sequenceBadge">Sequence: Not Loaded</span>
                     </div>
-                    
+
                     <!-- Upload & Preview Area -->
                     <div class="mri-viewport">
                         <div class="upload-area" id="uploadArea">
                             <div class="upload-pulse">
                                 <span class="upload-icon">📤</span>
                             </div>
-                            <p class="upload-text">Drag & drop MRI brain scan here</p>
-                            <p class="upload-subtext">Supports DICOM-derived JPG, JPEG, PNG</p>
-                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                            <p class="upload-text">Drag & drop MRI brain scan or DICOM here</p>
+                            <p class="upload-subtext">Supports DICOM (.dcm) or standard JPG, JPEG, PNG</p>
+                            <button class="btn btn-primary">
                                 SELECT SCAN FILE
                             </button>
-                            <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                            <input type="file" id="fileInput" accept="image/*,.dcm" style="display: none;">
                         </div>
 
                         <!-- Canvas Workstation (hidden until loaded) -->
                         <div class="canvas-container" id="canvasContainer" style="display: none;">
                             <canvas id="mriCanvas"></canvas>
+                            <img id="mriVideoPlayer"
+                                style="display: none; width: 100%; height: 100%; object-fit: contain; border-radius: 4px;" />
                             <div class="canvas-crosshairs">
                                 <div class="crosshair-h"></div>
                                 <div class="crosshair-v"></div>
@@ -68,6 +80,19 @@
                                 <canvas id="loupeCanvas" width="130" height="130"></canvas>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- Before/after overlay split slider -->
+                    <div class="split-slider-container" id="splitSliderContainer"
+                        style="display: none; padding: 12px 18px; background: rgba(0, 0, 0, 0.35); border-bottom: 1px solid rgba(255, 255, 255, 0.05); margin-top: -2px;">
+                        <div
+                            style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 10px; font-family: var(--font-orbitron); letter-spacing: 0.5px;">
+                            <span style="color: var(--text-muted);">Raw MRI (Left)</span>
+                            <span style="color: var(--neon-cyan);">BEFORE / AFTER GRAD-CAM DIVIDER</span>
+                            <span style="color: var(--neon-pink);">AI Mask Overlay (Right)</span>
+                        </div>
+                        <input type="range" id="splitSlider" min="0" max="100" value="50" class="slider"
+                            style="width: 100%;">
                     </div>
 
                     <!-- DICOM Header Details (hidden until loaded) -->
@@ -88,30 +113,40 @@
                     <!-- Image Tuning panel (hidden until loaded) -->
                     <div class="image-tuning-panel" id="tuningPanel" style="display: none;">
                         <h4 class="section-title">🔍 REAL-TIME DYNAMIC FILTERS</h4>
-                        
+
                         <div class="control-grid">
                             <div class="control-group">
-                                <label for="brightnessSlider">Brightness <span class="val-lbl" id="brightVal">100%</span></label>
+                                <label for="brightnessSlider">Brightness <span class="val-lbl"
+                                        id="brightVal">100%</span></label>
                                 <input type="range" id="brightnessSlider" min="50" max="150" value="100" class="slider">
                             </div>
                             <div class="control-group">
-                                <label for="contrastSlider">Contrast <span class="val-lbl" id="contrastVal">100%</span></label>
+                                <label for="contrastSlider">Contrast <span class="val-lbl"
+                                        id="contrastVal">100%</span></label>
                                 <input type="range" id="contrastSlider" min="50" max="200" value="100" class="slider">
                             </div>
                             <div class="control-group" id="heatmapOpacityGroup" style="display: none;">
-                                <label for="heatmapSlider">AI Mask Opacity <span class="val-lbl" id="heatmapVal">60%</span></label>
+                                <label for="heatmapSlider">AI Mask Opacity <span class="val-lbl"
+                                        id="heatmapVal">60%</span></label>
                                 <input type="range" id="heatmapSlider" min="10" max="100" value="60" class="slider">
                             </div>
                         </div>
 
                         <div class="filter-actions">
-                            <button class="btn btn-filter" id="btnInvert" onclick="toggleFilter('invert')">INVERT COLORS</button>
-                            <button class="btn btn-filter" id="btnSobel" onclick="toggleFilter('sobel')">SOBEL EDGE</button>
-                            <button class="btn btn-filter" id="btnThermal" onclick="toggleFilter('thermal')">THERMAL MAP</button>
-                            <button class="btn btn-filter" id="btnMagnifier" onclick="toggleMagnifierTool()">ZOOM LOUPE</button>
-                            <button class="btn btn-filter" id="btnSegmentation" onclick="toggleSegmentationMask()">AI MASK</button>
-                            <button class="btn btn-filter" id="btnRuler" onclick="toggleRulerTool()">MEASURE RULER</button>
-                            <button class="btn btn-filter" id="btnProfile" onclick="toggleProfileTool()">LINE PROFILE</button>
+                            <button class="btn btn-filter" id="btnInvert" onclick="toggleFilter('invert')">INVERT
+                                COLORS</button>
+                            <button class="btn btn-filter" id="btnSobel" onclick="toggleFilter('sobel')">SOBEL
+                                EDGE</button>
+                            <button class="btn btn-filter" id="btnThermal" onclick="toggleFilter('thermal')">THERMAL
+                                MAP</button>
+                            <button class="btn btn-filter" id="btnMagnifier" onclick="toggleMagnifierTool()">ZOOM
+                                LOUPE</button>
+                            <button class="btn btn-filter" id="btnSegmentation" onclick="toggleSegmentationMask()">AI
+                                MASK</button>
+                            <button class="btn btn-filter" id="btnRuler" onclick="toggleRulerTool()">MEASURE
+                                RULER</button>
+                            <button class="btn btn-filter" id="btnProfile" onclick="toggleProfileTool()">LINE
+                                PROFILE</button>
                             <button class="btn btn-reset" onclick="resetFilters()">RESET FILTER</button>
                         </div>
 
@@ -129,7 +164,9 @@
                             <div class="histogram-container">
                                 <canvas id="profileCanvas" width="280" height="75"></canvas>
                             </div>
-                            <span style="font-size: 10px; color: var(--text-muted); display: block; margin-top: 5px; text-align: center;">Click and drag on the active scan to sample intensities.</span>
+                            <span
+                                style="font-size: 10px; color: var(--text-muted); display: block; margin-top: 5px; text-align: center;">Click
+                                and drag on the active scan to sample intensities.</span>
                         </div>
                     </div>
 
@@ -137,74 +174,112 @@
                     <div class="sample-gallery-section" id="sampleGallery">
                         <h4 class="section-title">⚡ TRY WITH A CLINICAL PRESET SCAN</h4>
                         <div class="samples-grid">
-                            <!-- Sample 1: Glioma -->
-                            <div class="sample-card" onclick="loadSamplePreset('glioma')">
+                            <!-- Sample 1: Glioblastoma -->
+                            <div class="sample-card" onclick="loadSamplePreset('glioblastoma')">
                                 <div class="sample-preview">
                                     <svg viewBox="0 0 100 100" width="100%" height="100%">
-                                        <ellipse cx="50" cy="50" rx="35" ry="42" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
-                                        <path d="M 50 8 A 35 42 0 0 1 50 92 A 35 42 0 0 1 50 8 Z" fill="none" stroke="#21262d" stroke-dasharray="2,2"/>
+                                        <ellipse cx="50" cy="50" rx="35" ry="42" fill="#0d1117" stroke="#30363d"
+                                            stroke-width="2" />
+                                        <path d="M 50 8 A 35 42 0 0 1 50 92 A 35 42 0 0 1 50 8 Z" fill="none"
+                                            stroke="#21262d" stroke-dasharray="2,2" />
                                         <!-- Ventricles -->
-                                        <path d="M 40 40 Q 45 45 42 55 Q 38 48 40 40 Z" fill="#161b22" opacity="0.8"/>
-                                        <path d="M 60 40 Q 55 45 58 55 Q 62 48 60 40 Z" fill="#161b22" opacity="0.8"/>
-                                        <!-- Tumor Mass (Glioma) -->
-                                        <path d="M 62 30 Q 75 32 72 45 Q 60 48 62 30 Z" fill="#8b0000" opacity="0.5" filter="blur(2px)"/>
-                                        <circle cx="67" cy="38" r="5" fill="#f08080" opacity="0.8" filter="blur(1px)"/>
+                                        <path d="M 40 40 Q 45 45 42 55 Q 38 48 40 40 Z" fill="#161b22" opacity="0.8" />
+                                        <path d="M 60 40 Q 55 45 58 55 Q 62 48 60 40 Z" fill="#161b22" opacity="0.8" />
+                                        <!-- Tumor Mass (Glioblastoma) -->
+                                        <path d="M 62 30 Q 75 32 72 45 Q 60 48 62 30 Z" fill="#8b0000" opacity="0.5"
+                                            filter="blur(2px)" />
+                                        <circle cx="67" cy="38" r="5" fill="#f08080" opacity="0.8" filter="blur(1px)" />
                                         <!-- Edema halo -->
-                                        <path d="M 55 25 Q 82 28 78 52 Q 55 52 55 25 Z" fill="none" stroke="#ffff00" stroke-width="0.8" opacity="0.4" stroke-dasharray="1,1"/>
+                                        <path d="M 55 25 Q 82 28 78 52 Q 55 52 55 25 Z" fill="none" stroke="#ffff00"
+                                            stroke-width="0.8" opacity="0.4" stroke-dasharray="1,1" />
                                     </svg>
                                 </div>
-                                <span class="sample-name">Glioma Preset (T1C+)</span>
+                                <span class="sample-name">Glioblastoma (T1C+)</span>
                             </div>
-                            
-                            <!-- Sample 2: Meningioma -->
+
+                            <!-- Sample 2: Tuberculoma -->
+                            <div class="sample-card" onclick="loadSamplePreset('tuberculoma')">
+                                <div class="sample-preview">
+                                    <svg viewBox="0 0 100 100" width="100%" height="100%">
+                                        <ellipse cx="50" cy="50" rx="35" ry="42" fill="#0d1117" stroke="#30363d"
+                                            stroke-width="2" />
+                                        <!-- Ventricles -->
+                                        <path d="M 42 42 Q 47 46 44 54 Q 39 49 42 42 Z" fill="#161b22" opacity="0.8" />
+                                        <path d="M 58 42 Q 53 46 56 54 Q 61 49 58 42 Z" fill="#161b22" opacity="0.8" />
+                                        <!-- Ring-enhancing Tuberculoma -->
+                                        <circle cx="62" cy="42" r="7" fill="#4a3b2c" opacity="0.5" filter="blur(1px)" />
+                                        <circle cx="62" cy="42" r="5" fill="none" stroke="#ffbd59" stroke-width="1.5"
+                                            opacity="0.9" filter="blur(0.5px)" />
+                                        <!-- Edema halo -->
+                                        <circle cx="62" cy="42" r="12" fill="none" stroke="#ffff00" stroke-width="0.8"
+                                            opacity="0.3" stroke-dasharray="1,1" />
+                                    </svg>
+                                </div>
+                                <span class="sample-name">Tuberculoma (T1C+)</span>
+                            </div>
+
+                            <!-- Sample 3: Meningioma -->
                             <div class="sample-card" onclick="loadSamplePreset('meningioma')">
                                 <div class="sample-preview">
                                     <svg viewBox="0 0 100 100" width="100%" height="100%">
-                                        <ellipse cx="50" cy="50" rx="35" ry="42" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+                                        <ellipse cx="50" cy="50" rx="35" ry="42" fill="#0d1117" stroke="#30363d"
+                                            stroke-width="2" />
                                         <!-- Ventricles -->
-                                        <path d="M 42 42 Q 46 46 44 54 Q 39 49 42 42 Z" fill="#161b22" opacity="0.8"/>
-                                        <path d="M 58 42 Q 54 46 56 54 Q 61 49 58 42 Z" fill="#161b22" opacity="0.8"/>
+                                        <path d="M 42 42 Q 46 46 44 54 Q 39 49 42 42 Z" fill="#161b22" opacity="0.8" />
+                                        <path d="M 58 42 Q 54 46 56 54 Q 61 49 58 42 Z" fill="#161b22" opacity="0.8" />
                                         <!-- Meningioma Mass on edge -->
-                                        <circle cx="24" cy="46" r="8" fill="#4b0082" opacity="0.7"/>
-                                        <circle cx="24" cy="46" r="6" fill="#8a2be2" opacity="0.9" filter="blur(1px)"/>
+                                        <circle cx="24" cy="46" r="8" fill="#4b0082" opacity="0.7" />
+                                        <circle cx="24" cy="46" r="6" fill="#8a2be2" opacity="0.9" filter="blur(1px)" />
                                         <!-- Dural Tail line -->
-                                        <path d="M 21 34 Q 23 46 22 58" fill="none" stroke="#dda0dd" stroke-width="1.5" opacity="0.8"/>
+                                        <path d="M 21 34 Q 23 46 22 58" fill="none" stroke="#dda0dd" stroke-width="1.5"
+                                            opacity="0.8" />
                                     </svg>
                                 </div>
                                 <span class="sample-name">Meningioma (T1)</span>
-                            </div>
-
-                            <!-- Sample 3: Pituitary -->
-                            <div class="sample-card" onclick="loadSamplePreset('pituitary')">
-                                <div class="sample-preview">
-                                    <svg viewBox="0 0 100 100" width="100%" height="100%">
-                                        <ellipse cx="50" cy="50" rx="35" ry="42" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
-                                        <!-- Ventricles pushed outwards -->
-                                        <path d="M 38 38 Q 43 42 39 52 Q 35 46 38 38 Z" fill="#161b22" opacity="0.8"/>
-                                        <path d="M 62 38 Q 57 42 61 52 Q 65 46 62 38 Z" fill="#161b22" opacity="0.8"/>
-                                        <!-- Midline structure -->
-                                        <line x1="50" y1="15" x2="50" y2="85" stroke="#21262d" stroke-width="1"/>
-                                        <!-- Sellar Mass (Pituitary) -->
-                                        <circle cx="50" cy="58" r="7" fill="#cd5c5c" opacity="0.6"/>
-                                        <circle cx="50" cy="58" r="4.5" fill="#f08080" opacity="0.9" filter="blur(1px)"/>
-                                    </svg>
-                                </div>
-                                <span class="sample-name">Pituitary Adenoma (T2)</span>
                             </div>
 
                             <!-- Sample 4: Healthy -->
                             <div class="sample-card" onclick="loadSamplePreset('healthy')">
                                 <div class="sample-preview">
                                     <svg viewBox="0 0 100 100" width="100%" height="100%">
-                                        <ellipse cx="50" cy="50" rx="35" ry="42" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+                                        <ellipse cx="50" cy="50" rx="35" ry="42" fill="#0d1117" stroke="#30363d"
+                                            stroke-width="2" />
                                         <!-- Symmetric ventricles -->
-                                        <path d="M 42 42 Q 47 46 44 54 Q 39 49 42 42 Z" fill="#161b22" opacity="0.8"/>
-                                        <path d="M 58 42 Q 53 46 56 54 Q 61 49 58 42 Z" fill="#161b22" opacity="0.8"/>
+                                        <path d="M 42 42 Q 47 46 44 54 Q 39 49 42 42 Z" fill="#161b22" opacity="0.8" />
+                                        <path d="M 58 42 Q 53 46 56 54 Q 61 49 58 42 Z" fill="#161b22" opacity="0.8" />
                                         <!-- Symmetric hemispheres -->
-                                        <line x1="50" y1="10" x2="50" y2="90" stroke="#21262d" stroke-width="1" stroke-dasharray="1,2"/>
+                                        <line x1="50" y1="10" x2="50" y2="90" stroke="#21262d" stroke-width="1"
+                                            stroke-dasharray="1,2" />
                                     </svg>
                                 </div>
                                 <span class="sample-name">Healthy Control (T2)</span>
+                            </div>
+
+                            <!-- Sample 5: Cine Video Loop -->
+                            <div class="sample-card" onclick="loadVideoPreset()">
+                                <div class="sample-preview" style="position: relative;">
+                                    <svg viewBox="0 0 100 100" width="100%" height="100%">
+                                        <ellipse cx="50" cy="50" rx="35" ry="42" fill="#0d1117" stroke="#30363d"
+                                            stroke-width="2" />
+                                        <!-- Brain ventricles -->
+                                        <path d="M 42 42 Q 47 46 44 54 Q 39 49 42 42 Z" fill="#161b22" opacity="0.8" />
+                                        <path d="M 58 42 Q 53 46 56 54 Q 61 49 58 42 Z" fill="#161b22" opacity="0.8" />
+                                        <!-- Play icon overlay -->
+                                        <polygon points="45,35 65,50 45,65" fill="var(--neon-cyan)" opacity="0.85" />
+                                        <!-- Movie frame lines -->
+                                        <rect x="5" y="10" width="8" height="8" rx="1" fill="#30363d" opacity="0.5" />
+                                        <rect x="5" y="25" width="8" height="8" rx="1" fill="#30363d" opacity="0.5" />
+                                        <rect x="5" y="40" width="8" height="8" rx="1" fill="#30363d" opacity="0.5" />
+                                        <rect x="5" y="55" width="8" height="8" rx="1" fill="#30363d" opacity="0.5" />
+                                        <rect x="5" y="70" width="8" height="8" rx="1" fill="#30363d" opacity="0.5" />
+                                        <rect x="87" y="10" width="8" height="8" rx="1" fill="#30363d" opacity="0.5" />
+                                        <rect x="87" y="25" width="8" height="8" rx="1" fill="#30363d" opacity="0.5" />
+                                        <rect x="87" y="40" width="8" height="8" rx="1" fill="#30363d" opacity="0.5" />
+                                        <rect x="87" y="55" width="8" height="8" rx="1" fill="#30363d" opacity="0.5" />
+                                        <rect x="87" y="70" width="8" height="8" rx="1" fill="#30363d" opacity="0.5" />
+                                    </svg>
+                                </div>
+                                <span class="sample-name">Cine Video Loop</span>
                             </div>
                         </div>
                     </div>
@@ -213,13 +288,55 @@
 
             <!-- RIGHT COLUMN: AI Diagnostics & Conversation Assistant -->
             <section class="workspace-column right-pane animate-fade">
-                
+
+                <!-- You vs AI Interactive Game Card -->
+                <div class="card glass-card game-card animate-fade" id="gameCard"
+                    style="display: none; border-color: var(--neon-purple); box-shadow: 0 10px 30px rgba(157, 78, 221, 0.25); margin-bottom: 25px;">
+                    <div class="card-header" style="border-color: rgba(157, 78, 221, 0.2);">
+                        <h3><span class="icon">🎮</span> YOU VS AI: LESION CHALLENGE</h3>
+                        <span class="badge animate-pulse"
+                            style="background: rgba(157, 78, 221, 0.15); color: #c8b6ff; border: 1px solid rgba(157, 78, 221, 0.3);">INTERACTIVE</span>
+                    </div>
+                    <div class="game-body">
+                        <p style="font-size: 12px; color: var(--text-light); margin-bottom: 12px; line-height: 1.5;">
+                            Analyse the scan. Guess the pathology before the AI reveals its classification:</p>
+
+                        <div class="game-choices-grid"
+                            style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px;">
+                            <button class="btn btn-filter"
+                                onclick="submitUserGuess('Glioblastoma')">Glioblastoma</button>
+                            <button class="btn btn-filter" onclick="submitUserGuess('Meningioma')">Meningioma</button>
+                            <button class="btn btn-filter" onclick="submitUserGuess('Pituitary')">Pituitary
+                                Adenoma</button>
+                            <button class="btn btn-filter" onclick="submitUserGuess('Tuberculoma')">Tuberculoma</button>
+                            <button class="btn btn-filter" onclick="submitUserGuess('Healthy')">Healthy Control</button>
+                            <button class="btn btn-filter" onclick="submitUserGuess('Astrocytoma')">Astrocytoma</button>
+                        </div>
+
+                        <!-- Game result panel (hidden initially) -->
+                        <div class="game-result-panel" id="gameResultPanel"
+                            style="display: none; padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.1); text-align: center; margin-bottom: 12px;">
+                            <div id="gameResultIcon" style="font-size: 24px; margin-bottom: 6px;">🎉</div>
+                            <h4 id="gameResultTitle"
+                                style="font-family: var(--font-orbitron); font-size: 13px; margin-bottom: 4px;">MATCH
+                                DETECTED!</h4>
+                            <p id="gameResultText" style="font-size: 11px; color: var(--text-muted); line-height: 1.4;">
+                            </p>
+                        </div>
+
+                        <button class="btn btn-secondary" id="btnRevealAI" onclick="revealAIReport()"
+                            style="width: 100%; display: none; height: 36px; padding: 0 10px; line-height: 36px;">
+                            🔓 REVEAL DETAILED AI TELEMETRY
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Results Indicator -->
                 <div class="card glass-card results-card" id="resultsCard" style="display: none;">
                     <div class="card-header">
                         <h3><span class="icon">🔬</span> DIAGNOSTIC REPORT</h3>
                     </div>
-                    
+
                     <div class="result-body">
                         <div class="diagnosis-lead">
                             <span class="lead-lbl">CLASSIFICATION RESULT:</span>
@@ -235,6 +352,24 @@
                                 <div class="progress-bar-fill" id="confidenceFill"></div>
                             </div>
                             <p class="progress-bar-lbl"><span id="confidenceValue">0</span>% Certainty</p>
+                        </div>
+
+                        <!-- Live Inference Telemetry Stats Overlay -->
+                        <div class="inference-stats" id="inferenceTelemetry"
+                            style="padding: 10px 15px; border-radius: 10px; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.05); font-size: 11px; font-family: var(--font-orbitron); display: flex; flex-direction: column; gap: 4px;">
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: var(--text-muted);">Model Latency:</span>
+                                <span id="telemetryLatency" style="color: var(--neon-cyan); font-weight: bold;">--
+                                    ms</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: var(--text-muted);">Voxel Dimensions:</span>
+                                <span style="color: var(--text-light);">224 x 224 x 3 voxels</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: var(--text-muted);">Compute Target:</span>
+                                <span style="color: var(--color-success); font-weight: bold;">Local CPU (Offline)</span>
+                            </div>
                         </div>
 
                         <div class="results-actions">
@@ -255,14 +390,16 @@
                 <div class="card glass-card empty-dashboard" id="emptyState">
                     <div class="empty-glow-icon">🔬</div>
                     <h3>Radiology Workstation Inactive</h3>
-                    <p>Load an MRI brain scan file or select a clinical preset to initiate deep-learning classification.</p>
+                    <p>Load an MRI brain scan file or select a clinical preset to initiate deep-learning classification.
+                    </p>
                 </div>
 
                 <!-- Recent Workstation History -->
                 <div class="card glass-card history-card" id="historyCard">
                     <div class="card-header">
                         <h3><span class="icon">📁</span> WORKSTATION CASES ARCHIVE</h3>
-                        <button class="btn btn-reset btn-xs" onclick="clearHistory()" style="padding: 4px 8px; font-size: 10px;">CLEAR</button>
+                        <button class="btn btn-reset btn-xs" onclick="clearHistory()"
+                            style="padding: 4px 8px; font-size: 10px;">CLEAR</button>
                     </div>
                     <div class="history-list" id="historyList">
                         <p class="no-history-msg">No local cases saved in this session.</p>
@@ -283,23 +420,33 @@
                         <div class="msg-bubble system-msg">
                             <div class="msg-meta">NeuroAI Core v1.4</div>
                             <div class="msg-text">
-                                System loaded. Upload a brain MRI scan and I will auto-generate a comprehensive clinical diagnosis report. You can ask me any clinical questions regarding MRI sequences (T1, T2, contrast-enhanced) or brain anatomy.
+                                System loaded. Upload a brain MRI scan and I will auto-generate a comprehensive clinical
+                                diagnosis report. You can ask me any clinical questions regarding MRI sequences (T1, T2,
+                                contrast-enhanced) or brain anatomy.
                             </div>
                         </div>
                     </div>
 
                     <!-- Quick Command suggestion chips -->
                     <div class="quick-chips-container">
-                        <button class="chip" onclick="sendQuickMessage('Compare T1 vs T2 MRI sequences')">T1 vs T2 Sequences</button>
-                        <button class="chip" onclick="sendQuickMessage('What is T1C+ contrast enhanced MRI?')">T1C+ Contrast</button>
-                        <button class="chip" id="chipExplainDiag" style="display: none;" onclick="sendQuickMessage('Explain the current diagnosis')">Explain Diagnosis</button>
-                        <button class="chip" onclick="sendQuickMessage('What are the symptoms of a brain tumor?')">Clinical Symptoms</button>
-                        <button class="chip" onclick="sendQuickMessage('How accurate is this deep learning model?')">Model Accuracy</button>
+                        <button class="chip" onclick="sendQuickMessage('Compare T1 vs T2 MRI sequences')">T1 vs T2
+                            Sequences</button>
+                        <button class="chip" onclick="sendQuickMessage('What is T1C+ contrast enhanced MRI?')">T1C+
+                            Contrast</button>
+                        <button class="chip" id="chipExplainDiag" style="display: none;"
+                            onclick="sendQuickMessage('Explain the current diagnosis')">Explain Diagnosis</button>
+                        <button class="chip"
+                            onclick="sendQuickMessage('What are the symptoms of a brain tumor?')">Clinical
+                            Symptoms</button>
+                        <button class="chip"
+                            onclick="sendQuickMessage('How accurate is this deep learning model?')">Model
+                            Accuracy</button>
                     </div>
 
                     <!-- Chat Input Controls -->
                     <div class="chat-input-controls">
-                        <input type="text" id="chatInput" placeholder="Ask a radiological or diagnostic question..." autocomplete="off">
+                        <input type="text" id="chatInput" placeholder="Ask a radiological or diagnostic question..."
+                            autocomplete="off">
                         <button class="btn btn-send" id="btnSendChat" onclick="handleSendChat()">
                             <span>SEND</span>
                         </button>
@@ -310,8 +457,8 @@
 
         <!-- Glass Footer -->
         <footer class="footer">
-            <p>👨‍⚕️ Developed by Omkar Kotgire, PharmD (AI Enthusiast) | Powered by Python, TensorFlow & Keras | 44 Brain Tumor Classes</p>
-            <p class="disclaimer">⚠️ DISCLAIMER: This workstation is for educational & research demonstration purposes only. It is not an FDA-approved clinical diagnostic instrument.</p>
+            <p>👨‍⚕️ Developed by Omkar Kotgire, PharmD (AI Enthusiast) | Powered by Python, TensorFlow & Keras | 44
+                Brain Tumor Classes</p>
         </footer>
     </div>
 
@@ -332,24 +479,27 @@
                 <!-- LEFT: Sign-off form (no-print) -->
                 <div class="report-form-panel no-print">
                     <h3>✍️ CLINICAL SIGN-OFF</h3>
-                    <p class="form-desc">Review diagnostic details and append your signature to authenticate this diagnostic document.</p>
-                    
+                    <p class="form-desc">Review diagnostic details and append your signature to authenticate this
+                        diagnostic document.</p>
+
                     <div class="form-group">
                         <label for="signClinicianName">Clinician Name</label>
                         <input type="text" id="signClinicianName" placeholder="e.g. Dr. Jane Foster, MD">
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="signLicenseId">License / NPI Number</label>
                         <input type="text" id="signLicenseId" placeholder="e.g. MD-84952042">
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="signNotes">Clinical Assessment / Impression</label>
-                        <textarea id="signNotes" rows="5" placeholder="Enter findings, patient history correlation, or recommended next steps..."></textarea>
+                        <textarea id="signNotes" rows="5"
+                            placeholder="Enter findings, patient history correlation, or recommended next steps..."></textarea>
                     </div>
-                    
-                    <button class="btn btn-secondary btn-block" id="btnApplySignature" onclick="applyClinicalSignature()" style="width: 100%; margin-top: 15px;">
+
+                    <button class="btn btn-secondary btn-block" id="btnApplySignature"
+                        onclick="applyClinicalSignature()" style="width: 100%; margin-top: 15px;">
                         ✒️ SIGN & CERTIFY REPORT
                     </button>
                 </div>
@@ -358,98 +508,110 @@
                 <div class="report-content-wrapper">
                     <div class="report-content" id="reportPrintArea">
                         <div class="report-header-print">
-                    <div class="report-h-left">
-                        <h2>NEUROAI RADIOLOGY LABS</h2>
-                        <p class="report-sub">DEEP LEARNING NEURO-IMAGING ANALYSIS</p>
-                    </div>
-                    <div class="report-h-right">
-                        <p><strong>Date Generated:</strong> <span id="reportDate">2026-05-30</span></p>
-                        <p><strong>Report ID:</strong> <span id="reportId">NAI-49520935</span></p>
-                    </div>
-                </div>
-                
-                <hr class="report-divider">
+                            <div class="report-h-left">
+                                <h2>NEUROAI RADIOLOGY LABS</h2>
+                                <p class="report-sub">DEEP LEARNING NEURO-IMAGING ANALYSIS</p>
+                            </div>
+                            <div class="report-h-right">
+                                <p><strong>Date Generated:</strong> <span id="reportDate">2026-05-30</span></p>
+                                <p><strong>Report ID:</strong> <span id="reportId">NAI-49520935</span></p>
+                            </div>
+                        </div>
 
-                <div class="report-meta-grid">
-                    <div><strong>Patient Profile:</strong> <span id="reportPatientProfile">Anonymous Patient</span></div>
-                    <div><strong>Scanner Type:</strong> <span id="reportScannerType">DICOM Simulated Model</span></div>
-                    <div><strong>Study Type:</strong> <span id="reportStudyType">Brain MRI Classifier Scan</span></div>
-                    <div><strong>AI Version:</strong> <span>EfficientNetV2-B0 (Core-1.4)</span></div>
-                </div>
+                        <hr class="report-divider">
 
-                <div class="report-section-title">🖼️ SCAN FILE SPECIFICATION</div>
-                <div class="report-scan-display">
-                    <div class="report-img-wrapper">
-                        <img id="reportPreviewImg" src="" alt="MRI Preview">
-                    </div>
-                    <div class="report-scan-details">
-                        <p><strong>Sequence Model:</strong> <span id="reportSequence">T1-Weighted or T2-Weighted</span></p>
-                        <p><strong>Voxel Resolution:</strong> 224 x 224 Normalized</p>
-                        <p><strong>Processed Image Filters:</strong> <span id="reportAppliedFilters">None (Original)</span></p>
-                        <p><strong>Verification status:</strong> AI Synthesized Prediction</p>
-                    </div>
-                </div>
+                        <div class="report-meta-grid">
+                            <div><strong>Patient Profile:</strong> <span id="reportPatientProfile">Anonymous
+                                    Patient</span></div>
+                            <div><strong>Scanner Type:</strong> <span id="reportScannerType">DICOM Simulated
+                                    Model</span></div>
+                            <div><strong>Study Type:</strong> <span id="reportStudyType">Brain MRI Classifier
+                                    Scan</span></div>
+                            <div><strong>AI Version:</strong> <span>EfficientNetV2-B0 (Core-1.4)</span></div>
+                        </div>
 
-                <div class="report-section-title">🔬 AI DIAGNOSTIC SYNTHESIS</div>
-                <table class="report-table">
-                    <thead>
-                        <tr>
-                            <th>Deep Learning Target Class</th>
-                            <th>Sequence Sequence</th>
-                            <th>AI Certainty Confidence</th>
-                            <th>Diagnostic Safety Profile</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td class="bold-text highlight-cell" id="reportTargetClass">Astrocytoma T1</td>
-                            <td id="reportTargetSequence">T1-Weighted Sequence</td>
-                            <td class="bold-text" id="reportCertainty">98.4% Certainty</td>
-                            <td class="bold-text success-text" id="reportSafety">High Confidence</td>
-                        </tr>
-                    </tbody>
-                </table>
+                        <div class="report-section-title">🖼️ SCAN FILE SPECIFICATION</div>
+                        <div class="report-scan-display">
+                            <div class="report-img-wrapper">
+                                <img id="reportPreviewImg" src="" alt="MRI Preview">
+                            </div>
+                            <div class="report-scan-details">
+                                <p><strong>Sequence Model:</strong> <span id="reportSequence">T1-Weighted or
+                                        T2-Weighted</span></p>
+                                <p><strong>Voxel Resolution:</strong> 224 x 224 Normalized</p>
+                                <p><strong>Processed Image Filters:</strong> <span id="reportAppliedFilters">None
+                                        (Original)</span></p>
+                                <p><strong>Verification status:</strong> AI Synthesized Prediction</p>
+                            </div>
+                        </div>
 
-                <div class="report-section-title">📋 SYSTEM CLINICAL OVERVIEW & GUIDELINES</div>
-                <div class="report-clinical-text" id="reportClinicalExplanation">
-                    This section is dynamically loaded with diagnostic details...
-                </div>
+                        <div class="report-section-title">🔬 AI DIAGNOSTIC SYNTHESIS</div>
+                        <table class="report-table">
+                            <thead>
+                                <tr>
+                                    <th>Deep Learning Target Class</th>
+                                    <th>Sequence Sequence</th>
+                                    <th>AI Certainty Confidence</th>
+                                    <th>Diagnostic Safety Profile</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td class="bold-text highlight-cell" id="reportTargetClass">Astrocytoma T1</td>
+                                    <td id="reportTargetSequence">T1-Weighted Sequence</td>
+                                    <td class="bold-text" id="reportCertainty">98.4% Certainty</td>
+                                    <td class="bold-text success-text" id="reportSafety">High Confidence</td>
+                                </tr>
+                            </tbody>
+                        </table>
 
-                <div class="report-section-title">📋 RECOMMENDED ACTION CHECKLIST</div>
-                <ul class="report-checklist">
-                    <li><input type="checkbox" checked disabled> Correlate findings with patient clinical history and physical symptoms.</li>
-                    <li><input type="checkbox" checked disabled> Arrange multi-planar contrast-enhanced high-resolution MRI scans (T1C+ sequence) if not already completed.</li>
-                    <li><input type="checkbox" checked disabled> Referral to neurosurgeon or specialized neuro-oncologist for comprehensive evaluation.</li>
-                    <li><input type="checkbox" checked disabled> Biopsy or Histopathology verification (crucial for definitive grading of glial tumors).</li>
-                </ul>
+                        <div class="report-section-title">📋 SYSTEM CLINICAL OVERVIEW & GUIDELINES</div>
+                        <div class="report-clinical-text" id="reportClinicalExplanation">
+                            This section is dynamically loaded with diagnostic details...
+                        </div>
 
-                <!-- New clinical sign-off section -->
-                <div class="report-section-title">👨‍⚕️ CLINICAL SIGN-OFF & IMPRESSION</div>
-                <div class="report-signoff-block">
-                    <div class="signoff-details">
-                        <p><strong>Reviewing Clinician:</strong> <span id="printClinicianName">Not Reviewed (Self-Service Scan)</span></p>
-                        <p><strong>License/NPI ID:</strong> <span id="printLicenseId">N/A</span></p>
-                        <p><strong>Clinical Assessment/Notes:</strong> <span id="printNotes">No physician notes provided. This report represents the raw AI model output.</span></p>
-                        <p class="verification-hash-block"><strong>Verification Code:</strong> <code id="printVerificationHash">UNVERIFIED</code></p>
-                    </div>
-                    <div class="holographic-stamp-container">
-                        <div class="holographic-stamp" id="holographicStamp">
-                            <span class="stamp-border"></span>
-                            <span class="stamp-text">UNVERIFIED</span>
+                        <div class="report-section-title">📋 RECOMMENDED ACTION CHECKLIST</div>
+                        <ul class="report-checklist">
+                            <li><input type="checkbox" checked disabled> Correlate findings with patient clinical
+                                history and physical symptoms.</li>
+                            <li><input type="checkbox" checked disabled> Arrange multi-planar contrast-enhanced
+                                high-resolution MRI scans (T1C+ sequence) if not already completed.</li>
+                            <li><input type="checkbox" checked disabled> Referral to neurosurgeon or specialized
+                                neuro-oncologist for comprehensive evaluation.</li>
+                            <li><input type="checkbox" checked disabled> Biopsy or Histopathology verification (crucial
+                                for definitive grading of glial tumors).</li>
+                        </ul>
+
+                        <!-- New clinical sign-off section -->
+                        <div class="report-section-title">👨‍⚕️ CLINICAL SIGN-OFF & IMPRESSION</div>
+                        <div class="report-signoff-block">
+                            <div class="signoff-details">
+                                <p><strong>Reviewing Clinician:</strong> <span id="printClinicianName">Not Reviewed
+                                        (Self-Service Scan)</span></p>
+                                <p><strong>License/NPI ID:</strong> <span id="printLicenseId">N/A</span></p>
+                                <p><strong>Clinical Assessment/Notes:</strong> <span id="printNotes">No physician notes
+                                        provided. This report represents the raw AI model output.</span></p>
+                                <p class="verification-hash-block"><strong>Verification Code:</strong> <code
+                                        id="printVerificationHash">UNVERIFIED</code></p>
+                            </div>
+                            <div class="holographic-stamp-container">
+                                <div class="holographic-stamp" id="holographicStamp">
+                                    <span class="stamp-border"></span>
+                                    <span class="stamp-text">UNVERIFIED</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="report-footer-print">
+                            <p class="report-stamp">NEUROAI VERIFICATION SYSTEM | SECURE DIGITAL SIGNATURE DETECTED</p>
                         </div>
                     </div>
                 </div>
-
-                <div class="report-footer-print">
-                    <p class="report-stamp">NEUROAI VERIFICATION SYSTEM | SECURE DIGITAL SIGNATURE DETECTED</p>
-                    <p class="report-warning">⚠️ WARNING & DISCLAIMER: This report is a deep learning computer-aided diagnostic analysis. It does NOT constitute formal medical or oncology advice. Clinical decisions must always be confirmed by a board-certified medical doctor.</p>
-                </div>
-            </div>
             </div>
         </div>
-    </div>
 
-    <!-- Main JavaScript behavior -->
-    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+        <!-- Main JavaScript behavior -->
+        <script src="{{ url_for('static', filename='js/script.js', v='1.5') }}"></script>
 </body>
+
 </html>

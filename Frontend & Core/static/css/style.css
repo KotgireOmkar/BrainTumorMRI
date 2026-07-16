@@ -1364,6 +1364,7 @@ body {
     }
     
     .modal-card {
+        display: block !important;
         border: none !important;
         box-shadow: none !important;
         max-height: none !important;
@@ -1389,6 +1390,105 @@ body {
     /* Ensure clean typography and spacing for print */
     h2, h3, p, td, th {
         color: #000000 !important;
+    }
+
+    /* Print page optimization and narrow margin setup */
+    @page {
+        margin: 1.2cm 1.5cm;
+    }
+
+    .report-content {
+        font-size: 11px !important;
+        line-height: 1.35 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    
+    .report-divider {
+        margin: 10px 0 !important;
+    }
+    
+    .report-meta-grid {
+        margin-bottom: 12px !important;
+        padding: 8px 12px !important;
+        gap: 6px !important;
+        font-size: 11px !important;
+        break-inside: avoid;
+        -webkit-break-inside: avoid;
+    }
+    
+    .report-section-title {
+        margin-top: 12px !important;
+        margin-bottom: 6px !important;
+        padding-left: 6px !important;
+        break-after: avoid !important;
+        -webkit-break-after: avoid !important;
+    }
+    
+    .report-scan-display {
+        padding: 8px !important;
+        gap: 15px !important;
+        break-inside: avoid;
+        -webkit-break-inside: avoid;
+    }
+    
+    .report-img-wrapper {
+        width: 100px !important;
+        height: 100px !important;
+    }
+    
+    .report-table {
+        margin-top: 5px !important;
+        font-size: 10.5px !important;
+        break-inside: avoid;
+        -webkit-break-inside: avoid;
+    }
+    
+    .report-table th, .report-table td {
+        padding: 6px 10px !important;
+    }
+    
+    .report-clinical-text {
+        padding: 12px !important;
+        font-size: 11px !important;
+        line-height: 1.4 !important;
+        break-inside: auto !important;
+        -webkit-break-inside: auto !important;
+    }
+    
+    .report-checklist {
+        gap: 4px !important;
+        margin-top: 5px !important;
+        break-inside: avoid;
+        -webkit-break-inside: avoid;
+    }
+    
+    .report-signoff-block {
+        margin-top: 12px !important;
+        padding: 8px 15px !important;
+        break-inside: avoid;
+        -webkit-break-inside: avoid;
+    }
+    
+    .holographic-stamp {
+        width: 70px !important;
+        height: 70px !important;
+    }
+    
+    .holographic-stamp .stamp-border {
+        width: 60px !important;
+        height: 60px !important;
+    }
+    
+    .holographic-stamp .stamp-text {
+        font-size: 8px !important;
+    }
+    
+    .report-footer-print {
+        margin-top: 15px !important;
+        padding-top: 10px !important;
+        break-inside: avoid;
+        -webkit-break-inside: avoid;
     }
 }
 
@@ -1801,5 +1901,109 @@ body {
 .val-lbl {
     transition: var(--transition);
 }
+
+/* ==========================================================================
+   SHOWCASE ADDITIONS: READING ROOM & GAME MODE
+   ========================================================================== */
+
+/* Reading Room Mode overrides */
+body.reading-room {
+    --bg-darkest: #000000;
+    --bg-card: #0b0c10;
+    --bg-header: #050608;
+    --border-glass: #1b1e24;
+    --border-hover: #2b303b;
+    
+    /* Low-Contrast Palette to prevent eye fatigue in dark rooms */
+    --neon-cyan: #7f8c8d;
+    --neon-pink: #95a5a6;
+    --neon-purple: #7f8c8d;
+    --color-success: #2ecc71;
+    --color-warning: #f1c40f;
+    --color-info: #3498db;
+    --text-muted: #5e6b7c;
+}
+
+body.reading-room .gradient-bg {
+    background: #000000 !important;
+    opacity: 1;
+}
+
+body.reading-room .grid-overlay {
+    opacity: 0 !important;
+}
+
+body.reading-room .card {
+    box-shadow: none !important;
+    border-color: var(--border-glass) !important;
+}
+
+body.reading-room .pulse-ring,
+body.reading-room .chat-status-pulse {
+    animation: none !important;
+    box-shadow: none !important;
+    background: var(--neon-cyan) !important;
+    border-color: var(--neon-cyan) !important;
+}
+
+body.reading-room .title .highlight {
+    color: #ffffff;
+    text-shadow: none !important;
+}
+
+/* Guessing Game Mode Styles */
+.game-choices-grid .btn-filter {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 11px;
+    padding: 8px 10px;
+    cursor: pointer;
+    font-family: var(--font-outfit);
+}
+
+.game-choices-grid .btn-filter:hover {
+    border-color: var(--neon-purple);
+    background: rgba(157, 78, 221, 0.08);
+    color: #c8b6ff;
+}
+
+.game-choices-grid .btn-filter.selected {
+    background: rgba(157, 78, 221, 0.2) !important;
+    border-color: var(--neon-purple) !important;
+    color: #c8b6ff !important;
+    font-weight: bold;
+    box-shadow: 0 0 10px rgba(157, 78, 221, 0.2);
+}
+
+.game-choices-grid .btn-filter.correct {
+    background: rgba(0, 255, 135, 0.2) !important;
+    border-color: var(--color-success) !important;
+    color: var(--color-success) !important;
+}
+
+.game-choices-grid .btn-filter.incorrect {
+    background: rgba(255, 0, 127, 0.2) !important;
+    border-color: var(--neon-pink) !important;
+    color: var(--neon-pink) !important;
+}
+
+.game-result-panel.win {
+    border-color: rgba(0, 255, 135, 0.3) !important;
+    background: rgba(0, 255, 135, 0.05) !important;
+    color: var(--color-success) !important;
+}
+
+.game-result-panel.lose {
+    border-color: rgba(255, 0, 127, 0.3) !important;
+    background: rgba(255, 0, 127, 0.05) !important;
+    color: var(--neon-pink) !important;
+}
+
+/* Inference telemetry text improvements */
+.inference-stats div span {
+    font-size: 10px;
+    letter-spacing: 0.5px;
+}
+
 
 

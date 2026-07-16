@@ -301,40 +301,51 @@ Contrast: None
 
 ## 💻 8. Installation & Local Quickstart
 
-### Step 1: Clone & Setup Environment
+### Option A: One-Click Launch (Recommended)
+Simply double-click the **`launch.bat`** file in the project root. It will automatically:
+1. Create a local `.venv` virtual environment inside the project
+2. Install all dependencies offline from the bundled `dependencies/` folder
+3. Start the Flask server and open your browser to `http://127.0.0.1:5000`
+
+### Option B: Manual Setup
 Open your command terminal, navigate to your workspace directory, and execute:
+
+#### Step 1: Clone & Setup Environment
 ```powershell
 # Clone the repository
 git clone https://github.com/Omkar-Kotgire/Brain-Tumor-MRI-Classifier.git
 cd Brain-Tumor-MRI-Classifier
 
-# Create the virtual environment in a short path to avoid Windows Long Path errors
-python -m venv C:\Users\Omkar\Downloads\bt-venv
+# Create a virtual environment inside the project directory
+python -m venv .venv
 ```
 
-### Step 2: Install dependencies & Upgrades
+#### Step 2: Install Dependencies & Upgrades
 ```powershell
+# Activate the virtual environment
+.venv\Scripts\activate
+
 # Upgrade installer tools
-C:\Users\Omkar\Downloads\bt-venv\Scripts\python.exe -m pip install --upgrade pip
+python -m pip install --upgrade pip
 
 # Install requirements from Configs
-C:\Users\Omkar\Downloads\bt-venv\Scripts\python.exe -m pip install -r Configs/requirements.txt
+python -m pip install -r Configs/requirements.txt
 
 # Force modern TensorFlow compatibility
-C:\Users\Omkar\Downloads\bt-venv\Scripts\python.exe -m pip install tensorflow==2.17.0
+python -m pip install tensorflow==2.17.0
 
 # Override h5py to exact version (3.8.0)
-C:\Users\Omkar\Downloads\bt-venv\Scripts\python.exe -m pip install h5py==3.8.0 --no-deps --force-reinstall
+python -m pip install h5py==3.8.0 --no-deps --force-reinstall
 ```
 
-### Step 3: Run Model Serializer Compatibility Patch
+#### Step 3: Run Model Serializer Compatibility Patch
 ```powershell
-C:\Users\Omkar\Downloads\bt-venv\Scripts\python.exe "Machine Learning/scripts/patch2.py"
+python "Machine Learning/scripts/patch2.py"
 ```
 
-### Step 4: Run Flask Server
+#### Step 4: Run Flask Server
 ```powershell
-C:\Users\Omkar\Downloads\bt-venv\Scripts\python.exe Backend/app.py
+python Backend/app.py
 ```
 Open **[http://localhost:5000](http://localhost:5000)** in your web browser. Try testing with the built-in preset cards, or upload an active `.dcm` file!
 
